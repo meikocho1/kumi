@@ -80,6 +80,7 @@ defmodule Kumi.Diff do
     |> field_change(:type, desired.type, actual.type)
     |> field_change(:nullable, desired.nullable, actual.nullable)
     |> field_change(:default, desired.default, actual.default)
+    |> field_change(:datetime_precision, desired.datetime_precision, actual.datetime_precision)
   end
 
   defp field_change(acc, _field, same, same), do: acc

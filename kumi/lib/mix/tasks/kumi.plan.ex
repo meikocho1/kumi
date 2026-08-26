@@ -10,6 +10,8 @@ defmodule Mix.Tasks.Kumi.Plan do
                                  exits non-zero if anything needs REVIEW
                                  or is DANGEROUS (0 with no changes)
       mix kumi.plan --verbose   # + per-operation provenance
+      mix kumi.plan --probe     # + data-aware findings (reads live data,
+                                 opt-in — see `Kumi.Probe`)
 
   This is the convenience layer over `Kumi.plan/3`: it reads the host app's
   `:ash_domains` config (the Spark/Ash convention —
@@ -25,18 +27,22 @@ defmodule Mix.Tasks.Kumi.Plan do
   @impl Mix.Task
   def run(args) do
     Mix.Task.run("app.start")
-    {opts, _rest} = OptionParser.parse!(args, strict: [check: :boolean, verbose: :boolean])
+
+    {opts, _rest} =
+      OptionParser.parse!(args, strict: [check: :boolean, verbose: :boolean, probe: :boolean])
 
     otp_app = Mix.Project.config()[:app]
     domains = Application.get_env(otp_app, :ash_domains, [])
     repo = resolve_repo(domains)
 
-    plan = Kumi.plan(repo, domains)
+    plan = Kumi.plan(repo, domains, probe: opts[:probe] || false)
     ops = Enum.map(plan.entries, fn {op, _level, _reason} -> op end)
 
     if opts[:check], do: Mix.shell().info(Kumi.Plan.summary_line(plan))
 
-    Mix.shell().info(Kumi.Plan.Format.format(ops, verbose: opts[:verbose] || false))
+    Mix.shell().info(
+      Kumi.Plan.Format.format(ops, verbose: opts[:verbose] || false, findings: plan.findings)
+    )
 
     if opts[:check] do
       code = Kumi.Plan.exit_code(plan)

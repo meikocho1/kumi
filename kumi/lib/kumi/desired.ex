@@ -54,7 +54,8 @@ defmodule Kumi.Desired do
         name: to_string(attr.name),
         type: PgType.from_ash(attr.type, attr.constraints),
         nullable: attr.allow_nil?,
-        default: Default.from_ash(attr.default)
+        default: Default.from_ash(attr.default),
+        datetime_precision: PgType.precision_from_ash(attr.type, attr.constraints)
       }
     end)
   end

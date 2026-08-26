@@ -105,6 +105,31 @@ defmodule Kumi.Plan.Safety do
   defp classify_change(col, {:default, desired, actual}),
     do: {:safe, "changes #{col.name} default #{inspect(actual)} -> #{inspect(desired)}"}
 
+  # Verified empirically (v0.1.5, F33): `ALTER COLUMN ... TYPE timestamp(N)`
+  # between precisions succeeds with an implicit cast in both directions —
+  # widening adds no data, narrowing ROUNDS the fractional seconds (not a
+  # truncation, not a failure: 12:00:00.900001 -> 12:00:01, not .900000 or
+  # an error). So neither direction is DANGEROUS; both are REVIEW because
+  # narrowing is a real (if non-failing) loss of stored precision.
+  defp classify_change(col, {:datetime_precision, desired, actual})
+       when is_integer(desired) and is_integer(actual) and desired > actual,
+       do: {:review, "widens #{col.name} timestamp precision #{actual} -> #{desired}"}
+
+  defp classify_change(col, {:datetime_precision, desired, actual})
+       when is_integer(desired) and is_integer(actual),
+       do:
+         {:review,
+          "narrows #{col.name} timestamp precision #{actual} -> #{desired} (rounds sub-second values, does not fail)"}
+
+  # One side nil means the column stopped/started being a timestamp type
+  # entirely — that always arrives alongside a `:type` change, which
+  # already fails closed to DANGEROUS via `worst/1`. Nothing extra to say
+  # about precision alone here.
+  defp classify_change(col, {:datetime_precision, desired, actual}),
+    do:
+      {:safe,
+       "#{col.name} timestamp-ness changed (precision #{inspect(actual)} -> #{inspect(desired)}) — see accompanying type change"}
+
   defp worst(changes), do: Enum.max_by(changes, fn {level, _reason} -> severity(level) end)
 
   defp severity(:safe), do: 0

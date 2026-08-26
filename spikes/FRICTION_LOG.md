@@ -171,3 +171,35 @@
 | # | 領域 | 事実 | 摩擦度 |
 |---|---|---|---|
 | F32 | 移動・残留・重複の内訳 | 切り出し前のspike0_crm全体は64テスト、うち`test/kumi/`配下が52・非kumi（web/crm resource等）が12。パッケージ側は53テスト全green（移植52＋新規1：新設した公開API `Kumi.plan/3` を直接叩くテストを`diff_clean_state_test.exs`に追加——移植元には`Kumi.plan/3`自体が存在しなかったため純粋な移植ではなく新規追加）。内訳は純粋48＋DB連携4をテストハーネスに適応＋`Kumi.plan/3`直接テスト1。spike0_crm側は`test/kumi/`から4つのDB連携テスト（clean-state・missing-column・drift・rename-real-snapshots）を明示引数化して**統合テストとして残し**、残り48は削除（パッケージに移動済みのため）。spike0_crm全体のテスト数は64→16（残留4＋非kumi12）に減ったが、消えたわけではなく48はパッケージ側に、4は両側に存在する形になった。件数の合計だけを見ると「64が16に減った」ように見えるため、変更点として明示しておく。 | - |
+
+---
+
+# v0.1.5 — Data-aware / Precision
+
+> 目的：F18（timestamp精度の盲点）を解消し、`Kumi.Probe`でdata-aware safety probe（read-onlyクエリで
+> N件のNULL/重複/データ喪失を報告するfinding）を追加する（Blueprint v3 §7 Stage 2、§3.4 opt-in原則）。
+> 実装は`kumi`パッケージ本体（`Kumi.Actual`・`Kumi.Desired.PgType`・`Kumi.Diff`・`Kumi.Plan.Safety`・
+> 新設`Kumi.Probe`・`Kumi.Plan.Finding`）。CRITICAL REGRESSION GATE（パッケージ／spike0_crm双方の
+> clean-state diff=[]）は全工程を通じて維持した。
+
+## F18解消 — timestamp精度
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F33 | `information_schema.columns.datetime_precision`は素直に取れたが、値の意味はEcto側のハードコードを読まないと分からなかった | `datetime_precision`列は非timestamp型では`NULL`、timestamp系では整数（0〜6）を返す——ここまでは仕様通り単純だった。しかし「Ash側の`:utc_datetime`/`:utc_datetime_usec`はDB上何precisionになるのか」はAsh/AshPostgres側のどこにも明記されておらず、`Ecto.Adapters.Postgres.Connection`のprivate関数`column_type_name/2`を読んで初めて分かった：`:utc_datetime`/`:naive_datetime`/`:time`は`timestamp(0)`に**ハードコード固定**（precisionオプション自体が存在しない）、`_usec`系は明示的な`precision:`オプションが渡らない限り無指定の`timestamp`型になり、Postgresのデフォルトprecisionである6が採用される。AshPostgresのmigration generatorはこの`precision:`オプションをdatetime系attributeに対して渡していないため、実質「_usecは常に6、非usecは常に0」という2値だけが実際に起こりうる。実DB（`spike0_crm_dev`）で`tokens.expires_at`（`:utc_datetime`）＝0、`users.confirmed_at`（`:utc_datetime_usec`）＝6、`timestamps()`マクロが生成する`inserted_at`/`updated_at`（既定で`:utc_datetime_usec`）＝6であることを実測して裏付けた。 | 中 |
+| F34 | 精度の狭小化（narrowing）は「失敗する」という予断を実測で覆した | タスク仕様は「6→0への狭小化はDANGEROUS（truncateする？）、rounding して失敗しないと確認できればREVIEWに倒してよい」という条件付きの指示だった。`kumi_db`のdocker実DBで直接検証：`timestamp(6)`列に`12:00:00.123999`を入れて`ALTER COLUMN ... TYPE timestamp(0)`すると`12:00:00`（切り捨てではなく四捨五入で同じ秒に丸まる）、`12:00:00.900001`を入れると`12:00:01`（次の秒に繰り上がる四捨五入）になり、どちらもエラーなく成功した。truncateではなくroundingであり、失敗もしないことを実測で確認できたため、狭小化・拡大化どちらもREVIEW（DANGEROUSにしない）という1本の規則に統一した——DANGEROUSはあくまで「データが失われる/操作が失敗する」ケース用に予約する、というSafetyモジュールの既存方針（F23参照）と整合させた判断。 | 中 |
+| F35 | `Ash.Type.NaiveDatetimeUsec`は存在しない——`utc_datetime`系と非対称 | `:utc_datetime`/`:utc_datetime_usec`はAsh側で別々の型モジュール（`Ash.Type.UtcDatetime`/`Ash.Type.UtcDatetimeUsec`、`Ash.Type.NewType`のconstraints違いのラッパー）として実装されているが、`Ash.Type.NaiveDatetime`にはusecバリアントの型モジュールが存在せず、`storage_type/1`が常に`:naive_datetime`を返す（constraintsを見ない）。したがってAshPostgresの`migration_type/2`もconstraints次第で`:naive_datetime_usec`を返す経路を持たない——`Kumi.Desired.PgType`（既存コード）にあった`to_pg_name(:naive_datetime_usec)`ケースは現行Ashバージョンでは到達不能なデッドコードだった（今回追加した`precision_from_ash/2`も対称性のため同じ枝を残したが、同じ理由で到達不能）。テストでは実際に呼べる`Ash.Type.NaiveDatetimeUsec`が存在しないため、そのケースのテストは書かずに諦めた。 | 低 |
+
+## `Kumi.Probe` — read-only SQL識別子クオートのコスト
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F36 | 識別子クオート自体は1関数（3行）で済んだが、「どこに要るか」の洗い出しが本体だった | `quote_ident/1`（`"` + `String.replace(name, "\"", "\"\"")` + `"`）という実装自体は3行で終わったが、Kumiのpg_catalog/Ash由来の名前（テーブル名・カラム名・identityの列リスト）は「信頼できるが空白や予約語を含みうる」——実際にテストで`"Probe Order"`テーブル・`"Group"`列（予約語）を使い、クオートなしでは構文エラーになることを確認した。5種類の probe SQL（NULL count・重複count・data-loss count・drop_table count・type change count）すべてで個別に組み立てず、`quote_ident/1`を1箇所に集約して全SQL生成が経由する形にした——モジュールごとに散らばらせていたら、いずれか1つで生クオート忘れが起きるリスクがあった。 | 低 |
+| F37 | UNIQUE制約とNULLの扱いの違いをGROUP BYクエリに反映する必要があった | 重複グループ数の検出を素朴に`GROUP BY col HAVING count(*) > 1`だけで書くと、複数のNULL行が「NULL同士の重複グループ」として誤ってカウントされる。しかしPostgresのUNIQUE制約はNULLを「区別可能な値」として扱い、NULL同士は重複とみなさない（複数NULL行があってもUNIQUE制約には抵触しない）。実際に検証用テストで`(a, a, b, b, b, c, NULL, NULL)`という値を入れ、`WHERE col IS NOT NULL`を`GROUP BY`の前に挟まないと期待の2件（aのペア・bの3件グループ）ではなく3件（NULLペアも含む）を返すことを確認し、`not_null_clause`を全indexed columnに対して`AND`で連結する形で対処した。 | 中 |
+| F38 | probeクエリのパフォーマンス上限は今回未対応・既知の天井として明記 | 全probe（NULL count・重複count・data-loss count・drop_table count・type change count）は`count(*)`（または`GROUP BY ... HAVING`の上に`count(*)`）で、`LIMIT`もサンプリングも一切していない。数百万行規模のテーブルに対しては単純なsequential scanコストが乗る——今回は意図的にサンプリングを実装せず、`Kumi.Probe`のmoduledocに「既知の天井」として明記するだけに留めた（`--probe`自体がopt-inなので、大規模テーブルを持つ利用者は明示的に選んで実行することになる、という設計上の逃げ道はある）。 | 低（対応せず） |
+
+## 検証結果
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F39 | Go/No-Go判定 | パッケージ側73テスト全green（既存53＋新規20：精度関連8＝`pg_type_test.exs`4＋`safety_test.exs`2＋`precision_drift_test.exs`2、probe関連11＝`probe_test.exs`、findings表示1＝`format_test.exs`）。spike0_crm側16テスト全green、`mix kumi.plan`は変更後も`No changes. Database matches application definition.`のまま（CRITICAL REGRESSION GATE維持）。`spike0_crm_dev`に`ALTER TABLE crm_accounts ADD COLUMN legacy_notes text`を一時的に投入して`mix kumi.plan --probe`を実行し、`DANGEROUS`分類の`remove_column`の下に`finding: 0 rows contain data that would be lost`が正しくインデントされて表示されることを確認、検証後は`DROP COLUMN`で元に戻し、`mix kumi.plan`が再び`No changes.`に戻ることも確認した。 | - |

@@ -44,4 +44,25 @@ defmodule Kumi.Plan.FormatTest do
 
     assert output =~ "via: pg_catalog"
   end
+
+  test "findings are rendered indented under their matching op, not under unrelated ops" do
+    op = {:remove_column, "t", %Column{name: "notes", type: "text", nullable: true}}
+    other_op = {:add_table, %Kumi.Schema.Table{name: "u"}}
+
+    finding = %Kumi.Plan.Finding{
+      op: op,
+      query_description: "count(*) FROM t WHERE notes IS NOT NULL",
+      count: 3,
+      note: "3 rows contain data that would be lost"
+    }
+
+    output = Format.format([op, other_op], findings: [finding])
+
+    lines = String.split(output, "\n")
+    op_index = Enum.find_index(lines, &(&1 =~ "notes"))
+    finding_index = Enum.find_index(lines, &(&1 =~ "finding:"))
+
+    assert output =~ "finding: 3 rows contain data that would be lost"
+    assert finding_index == op_index + 1
+  end
 end

@@ -4,6 +4,10 @@ defmodule Kumi.Plan.Format do
   +/-/~ text, grouped per table, with each line's `Kumi.Plan.Safety`
   classification and reason, and an overall "N safe / N review / N
   dangerous" summary line.
+
+  With the `:findings` option (a list of `Kumi.Plan.Finding`, from
+  `Kumi.Probe` — see `Kumi.Plan.findings`), each finding is rendered as an
+  extra indented line under the operation it was probed for.
   """
 
   alias Kumi.Plan.{Rename, Safety}
@@ -15,6 +19,7 @@ defmodule Kumi.Plan.Format do
   def format(ops, opts) do
     verbose? = Keyword.get(opts, :verbose, false)
     snapshot_dir = Keyword.get(opts, :snapshot_dir, Rename.default_snapshot_dir())
+    findings_by_op = opts |> Keyword.get(:findings, []) |> Enum.group_by(& &1.op)
 
     entries = Enum.map(ops, fn op -> {op, Safety.classify(op)} end)
 
@@ -23,7 +28,7 @@ defmodule Kumi.Plan.Format do
       |> Enum.group_by(fn {op, _classification} -> table_name(op) end)
       |> Enum.sort_by(fn {name, _entries} -> name end)
       |> Enum.map_join("\n", fn {table, table_entries} ->
-        format_table(table, table_entries, verbose?, snapshot_dir)
+        format_table(table, table_entries, verbose?, snapshot_dir, findings_by_op)
       end)
 
     counts = Enum.frequencies_by(entries, fn {_op, {level, _reason}} -> level end)
@@ -38,20 +43,30 @@ defmodule Kumi.Plan.Format do
   defp table_name({_op, table, _entity}), do: table
   defp table_name({_op, table, _entity, _changes}), do: table
 
-  defp format_table(table, entries, verbose?, snapshot_dir) do
+  defp format_table(table, entries, verbose?, snapshot_dir, findings_by_op) do
     "#{table}:\n" <>
-      Enum.map_join(entries, "\n", &format_entry(&1, verbose?, snapshot_dir)) <> "\n"
+      Enum.map_join(entries, "\n", &format_entry(&1, verbose?, snapshot_dir, findings_by_op)) <>
+      "\n"
   end
 
-  defp format_entry({op, {level, reason}}, verbose?, snapshot_dir) do
+  defp format_entry({op, {level, reason}}, verbose?, snapshot_dir, findings_by_op) do
     line = format_op(op) <> "  [#{label(level)}: #{reason}]"
 
-    if verbose? do
-      line <> "\n" <> provenance_line(op, snapshot_dir)
-    else
-      line
-    end
+    line =
+      if verbose? do
+        line <> "\n" <> provenance_line(op, snapshot_dir)
+      else
+        line
+      end
+
+    findings_by_op
+    |> Map.get(op, [])
+    |> Enum.map_join("", &("\n" <> finding_line(&1)))
+    |> then(&(line <> &1))
   end
+
+  defp finding_line(%Kumi.Plan.Finding{note: note, query_description: query_description}),
+    do: "      finding: #{note}  (#{query_description})"
 
   defp provenance_line({:possible_rename, table, x, _y}, snapshot_dir) do
     case Rename.provenance(table, x.name, snapshot_dir) do

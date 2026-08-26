@@ -4,12 +4,21 @@ defmodule Kumi.Plan do
   operation has been classified by `Kumi.Plan.Safety` and rolled up into
   summary counts. This is what `mix kumi.plan` renders and what
   `--check` inspects to decide its exit code.
+
+  `:findings` is populated only when `Kumi.plan/3` is called with
+  `probe: true` (default `false`) — a flat list of `Kumi.Plan.Finding`
+  structs from `Kumi.Probe`. It's a separate field rather than folded into
+  `entries` on purpose: `entries`/`safe`/`review`/`dangerous` must stay
+  reproducible from schema alone with no database read beyond
+  `Kumi.Actual`'s introspection, so `--check`'s exit code never depends on
+  live data. Findings are additional evidence, not part of the plan's
+  classification.
   """
 
-  alias Kumi.Plan.Safety
+  alias Kumi.Plan.{Finding, Safety}
 
   @enforce_keys [:entries]
-  defstruct [:entries, safe: 0, review: 0, dangerous: 0]
+  defstruct [:entries, safe: 0, review: 0, dangerous: 0, findings: []]
 
   @type entry :: {term(), Safety.level(), Safety.reason()}
 
@@ -17,7 +26,8 @@ defmodule Kumi.Plan do
           entries: [entry()],
           safe: non_neg_integer(),
           review: non_neg_integer(),
-          dangerous: non_neg_integer()
+          dangerous: non_neg_integer(),
+          findings: [Finding.t()]
         }
 
   @spec build([term()]) :: t()

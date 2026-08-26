@@ -94,5 +94,24 @@ defmodule Kumi.Plan.SafetyTest do
       changes = [{:nullable, false, true}, {:type, "numeric", "text"}]
       assert {:dangerous, _} = Safety.classify({:change_column, "t", col, changes})
     end
+
+    test "change_column: widening timestamp precision (0 -> 6) is review, not dangerous" do
+      col = %Column{name: "x", type: "timestamp", nullable: true}
+
+      assert {:review, reason} =
+               Safety.classify({:change_column, "t", col, [{:datetime_precision, 6, 0}]})
+
+      assert reason =~ "widens"
+    end
+
+    test "change_column: narrowing timestamp precision (6 -> 0) is review — verified to round, not fail" do
+      col = %Column{name: "x", type: "timestamp", nullable: true}
+
+      assert {:review, reason} =
+               Safety.classify({:change_column, "t", col, [{:datetime_precision, 0, 6}]})
+
+      assert reason =~ "narrows"
+      assert reason =~ "does not fail"
+    end
   end
 end

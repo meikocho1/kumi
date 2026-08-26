@@ -20,6 +20,30 @@ defmodule Kumi.Desired.PgType do
     |> to_pg_name()
   end
 
+  @doc """
+  Expected `information_schema.columns.datetime_precision` for an Ash
+  attribute, or `nil` for a non-datetime type.
+
+  Empirically verified against `Ecto.Adapters.Postgres.Connection` (the
+  module that actually emits the `CREATE TABLE`/`ALTER TABLE` column type
+  SQL): `:utc_datetime`/`:naive_datetime`/`:time` are hardcoded to
+  `timestamp(0)` — no precision option exists for them. The `_usec` variants
+  get no explicit `(N)` at all unless a `:precision` migration option is
+  passed (AshPostgres does not pass one for these types), so Postgres
+  applies its own default, which is 6. Confirmed against the real spike DB:
+  `tokens.expires_at` (`:utc_datetime`) is precision 0, `users.confirmed_at`
+  (`:utc_datetime_usec`) and every `timestamps()`-generated column (which
+  default to `:utc_datetime_usec`) are precision 6.
+  """
+  @spec precision_from_ash(module(), keyword()) :: 0 | 6 | nil
+  def precision_from_ash(type, constraints) do
+    case AshPostgres.MigrationGenerator.get_migration_type(type, constraints) do
+      migration_type when migration_type in [:utc_datetime, :naive_datetime, :time] -> 0
+      migration_type when migration_type in [:utc_datetime_usec, :naive_datetime_usec, :time_usec] -> 6
+      _other -> nil
+    end
+  end
+
   defp to_pg_name({:decimal, _precision, _scale}), do: "numeric"
   defp to_pg_name({:decimal, _size, _precision, _scale}), do: "numeric"
   defp to_pg_name({:array, inner}), do: "_#{to_pg_name(inner)}"

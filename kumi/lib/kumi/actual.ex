@@ -42,7 +42,7 @@ defmodule Kumi.Actual do
   # the real name instead of the useless "USER-DEFINED" label.
   defp columns_by_table(repo) do
     sql = """
-    SELECT table_name, column_name, is_nullable, column_default, udt_name
+    SELECT table_name, column_name, is_nullable, column_default, udt_name, datetime_precision
     FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name <> $1
     ORDER BY table_name, ordinal_position
@@ -50,12 +50,20 @@ defmodule Kumi.Actual do
 
     repo
     |> query!(sql, [@excluded_table])
-    |> Enum.group_by(fn [table, _, _, _, _] -> table end, fn [_, name, nullable, default, type] ->
+    |> Enum.group_by(fn [table, _, _, _, _, _] -> table end, fn [
+                                                                    _,
+                                                                    name,
+                                                                    nullable,
+                                                                    default,
+                                                                    type,
+                                                                    datetime_precision
+                                                                  ] ->
       %Column{
         name: name,
         type: type,
         nullable: nullable == "YES",
-        default: Default.from_sql(default)
+        default: Default.from_sql(default),
+        datetime_precision: datetime_precision
       }
     end)
   end
