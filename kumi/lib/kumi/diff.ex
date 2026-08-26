@@ -91,10 +91,14 @@ defmodule Kumi.Diff do
     actual_by_col = index_by(actual_fks, & &1.column)
 
     adds =
-      for {col, fk} <- desired_by_col, not Map.has_key?(actual_by_col, col), do: {:add_fk, table, fk}
+      for {col, fk} <- desired_by_col,
+          not Map.has_key?(actual_by_col, col),
+          do: {:add_fk, table, fk}
 
     removes =
-      for {col, fk} <- actual_by_col, not Map.has_key?(desired_by_col, col), do: {:remove_fk, table, fk}
+      for {col, fk} <- actual_by_col,
+          not Map.has_key?(desired_by_col, col),
+          do: {:remove_fk, table, fk}
 
     adds ++ removes
   end

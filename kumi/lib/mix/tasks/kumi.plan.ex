@@ -39,18 +39,7 @@ defmodule Mix.Tasks.Kumi.Plan do
         strict: [check: :boolean, verbose: :boolean, probe: :boolean, app: :string]
       )
 
-    plan =
-      case opts[:app] do
-        nil ->
-          otp_app = Mix.Project.config()[:app]
-          domains = Application.get_env(otp_app, :ash_domains, [])
-          repo = resolve_repo(domains)
-          Kumi.plan(repo, domains, probe: opts[:probe] || false)
-
-        app_name ->
-          app = Module.concat([app_name])
-          Kumi.plan_app(app, probe: opts[:probe] || false)
-      end
+    plan = Mix.Tasks.Kumi.Resolve.build_plan(opts[:app], opts[:probe] || false)
 
     ops = Enum.map(plan.entries, fn {op, _level, _reason} -> op end)
 
@@ -63,30 +52,6 @@ defmodule Mix.Tasks.Kumi.Plan do
     if opts[:check] do
       code = Kumi.Plan.exit_code(plan)
       if code != 0, do: exit({:shutdown, code})
-    end
-  end
-
-  defp resolve_repo(domains) do
-    repos =
-      domains
-      |> Enum.flat_map(&Ash.Domain.Info.resources/1)
-      |> Enum.uniq()
-      |> Enum.filter(&(Ash.Resource.Info.data_layer(&1) == AshPostgres.DataLayer))
-      |> Enum.map(&AshPostgres.DataLayer.Info.repo/1)
-      |> Enum.uniq()
-
-    case repos do
-      [repo] ->
-        repo
-
-      [] ->
-        Mix.raise("mix kumi.plan: no AshPostgres-backed resources found across :ash_domains")
-
-      many ->
-        Mix.raise(
-          "mix kumi.plan: found multiple repos across :ash_domains (#{inspect(many)}) — " <>
-            "v0.1 supports a single repo only"
-        )
     end
   end
 end

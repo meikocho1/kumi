@@ -28,13 +28,19 @@ defmodule KumiAdmin.ResourceShowLive do
         {:noreply,
          socket
          |> put_flash(:info, "Deleted.")
-         |> push_navigate(to: "#{socket.assigns.mount_path}/#{KumiAdmin.Slug.for_resource(socket.assigns.resource)}")}
+         |> push_navigate(
+           to:
+             "#{socket.assigns.mount_path}/#{KumiAdmin.Slug.for_resource(socket.assigns.resource)}"
+         )}
 
       {:ok, _record} ->
         {:noreply,
          socket
          |> put_flash(:info, "Deleted.")
-         |> push_navigate(to: "#{socket.assigns.mount_path}/#{KumiAdmin.Slug.for_resource(socket.assigns.resource)}")}
+         |> push_navigate(
+           to:
+             "#{socket.assigns.mount_path}/#{KumiAdmin.Slug.for_resource(socket.assigns.resource)}"
+         )}
 
       {:error, _reason} ->
         {:noreply, put_flash(socket, :error, "You don't have permission to do that.")}

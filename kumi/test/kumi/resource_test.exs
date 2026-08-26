@@ -62,6 +62,7 @@ defmodule Kumi.ResourceTest do
       recompiled = Kumi.Test.Resource.CustomerExpandCheck
 
       assert normalize_attributes(recompiled) == normalize_attributes(Customer)
+
       assert normalize_relationship(recompiled, :account) ==
                normalize_relationship(Customer, :account)
 
@@ -81,10 +82,19 @@ defmodule Kumi.ResourceTest do
     end
 
     test "expand output is exactly what Kumi.Resource.Codegen.generate/3 produces (single source of truth)" do
-      opts = [domain: Kumi.Test.ResourceDomain, repo: Kumi.Test.Repo, table: "kumi_test_resource_customers"]
+      opts = [
+        domain: Kumi.Test.ResourceDomain,
+        repo: Kumi.Test.Repo,
+        table: "kumi_test_resource_customers"
+      ]
 
       specs = [
-        %Kumi.Resource.FieldSpec{kind: :field, name: :name, type: :string, opts: [required: true]},
+        %Kumi.Resource.FieldSpec{
+          kind: :field,
+          name: :name,
+          type: :string,
+          opts: [required: true]
+        },
         %Kumi.Resource.FieldSpec{kind: :field, name: :email, type: :email, opts: []},
         %Kumi.Resource.FieldSpec{
           kind: :field,
@@ -169,7 +179,8 @@ defmodule Kumi.ResourceTest do
     resource
     |> Ash.Resource.Info.attributes()
     |> Enum.map(fn attr ->
-      {attr.name, attr.type, attr.allow_nil?, attr.default, normalize_constraints(attr.constraints)}
+      {attr.name, attr.type, attr.allow_nil?, attr.default,
+       normalize_constraints(attr.constraints)}
     end)
     |> Enum.sort()
   end

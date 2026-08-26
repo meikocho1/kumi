@@ -5,7 +5,12 @@ defmodule Kumi.Plan.SafetyTest do
   alias Kumi.Schema.{Column, ForeignKey, Index, Table}
 
   @table %Table{name: "t"}
-  @fk %ForeignKey{name: "fk", column: "account_id", references_table: "a", references_column: "id"}
+  @fk %ForeignKey{
+    name: "fk",
+    column: "account_id",
+    references_table: "a",
+    references_column: "id"
+  }
 
   describe "classify/1 — one rule branch per test" do
     test "add_table is safe" do
@@ -63,7 +68,9 @@ defmodule Kumi.Plan.SafetyTest do
 
     test "change_column: tightening nullable to NOT NULL is review" do
       col = %Column{name: "x", type: "text", nullable: false}
-      assert {:review, _} = Safety.classify({:change_column, "t", col, [{:nullable, false, true}]})
+
+      assert {:review, _} =
+               Safety.classify({:change_column, "t", col, [{:nullable, false, true}]})
     end
 
     test "change_column: relaxing NOT NULL to nullable is safe" do
@@ -73,11 +80,14 @@ defmodule Kumi.Plan.SafetyTest do
 
     test "change_column: a known widening type change is review" do
       col = %Column{name: "x", type: "text", nullable: true}
-      assert {:review, _} = Safety.classify({:change_column, "t", col, [{:type, "text", "varchar"}]})
+
+      assert {:review, _} =
+               Safety.classify({:change_column, "t", col, [{:type, "text", "varchar"}]})
     end
 
     test "change_column: a narrowing/unknown type change is dangerous by default" do
       col = %Column{name: "x", type: "numeric", nullable: true}
+
       assert {:dangerous, _} =
                Safety.classify({:change_column, "t", col, [{:type, "numeric", "text"}]})
     end

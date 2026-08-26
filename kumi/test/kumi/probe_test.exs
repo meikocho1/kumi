@@ -103,8 +103,10 @@ defmodule Kumi.ProbeTest do
     test "add_table, add_fk, remove_fk, possible_rename yield no findings" do
       ops = [
         {:add_table, %Table{name: "t"}},
-        {:add_fk, "t", %ForeignKey{name: "fk", column: "a_id", references_table: "a", references_column: "id"}},
-        {:remove_fk, "t", %ForeignKey{name: "fk", column: "a_id", references_table: "a", references_column: "id"}}
+        {:add_fk, "t",
+         %ForeignKey{name: "fk", column: "a_id", references_table: "a", references_column: "id"}},
+        {:remove_fk, "t",
+         %ForeignKey{name: "fk", column: "a_id", references_table: "a", references_column: "id"}}
       ]
 
       assert Kumi.Probe.run(Kumi.Test.Repo, plan_of(ops)) == []

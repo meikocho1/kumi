@@ -92,7 +92,8 @@ defmodule Kumi.Plan.Safety do
     if {actual, desired} in @widening_pairs do
       {:review, "widens #{col.name} type #{actual} -> #{desired}"}
     else
-      {:dangerous, "narrows or changes #{col.name} type #{actual} -> #{desired} (default: unsafe)"}
+      {:dangerous,
+       "narrows or changes #{col.name} type #{actual} -> #{desired} (default: unsafe)"}
     end
   end
 

@@ -55,7 +55,8 @@ defmodule KumiAdmin.FormFields do
   """
   @spec widget(Ash.Resource.Attribute.t(), Ash.Resource.Relationships.BelongsTo.t() | nil) ::
           widget()
-  def widget(_attribute, relationship) when not is_nil(relationship), do: {:belongs_to, relationship}
+  def widget(_attribute, relationship) when not is_nil(relationship),
+    do: {:belongs_to, relationship}
 
   def widget(%{type: Ash.Type.Boolean}, nil), do: :checkbox
   def widget(%{type: t}, nil) when t in [Ash.Type.Integer], do: :number
@@ -63,7 +64,12 @@ defmodule KumiAdmin.FormFields do
   def widget(%{type: Ash.Type.Date}, nil), do: :date
 
   def widget(%{type: t}, nil)
-      when t in [Ash.Type.UtcDatetime, Ash.Type.UtcDatetimeUsec, Ash.Type.NaiveDatetime, Ash.Type.DateTime],
+      when t in [
+             Ash.Type.UtcDatetime,
+             Ash.Type.UtcDatetimeUsec,
+             Ash.Type.NaiveDatetime,
+             Ash.Type.DateTime
+           ],
       do: :datetime_local
 
   def widget(%{type: Ash.Type.Atom, constraints: constraints}, nil) do

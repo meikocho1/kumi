@@ -18,7 +18,9 @@ defmodule KumiAdmin.Components.Shell do
 
   def shell(assigns) do
     ~H"""
-    <style>{css()}</style>
+    <style>
+      {css()}
+    </style>
     <div class="kumi-admin-shell">
       <nav class="kumi-admin-sidebar">
         <a href={@mount_path} class="kumi-admin-app-title">

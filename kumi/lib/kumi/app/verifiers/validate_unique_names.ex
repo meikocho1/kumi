@@ -33,7 +33,8 @@ defmodule Kumi.App.Verifiers.ValidateUniqueNames do
          DslError.exception(
            module: module,
            path: path,
-           message: "duplicate #{label}(s): #{duplicates |> Enum.uniq() |> Enum.map_join(", ", &inspect/1)}"
+           message:
+             "duplicate #{label}(s): #{duplicates |> Enum.uniq() |> Enum.map_join(", ", &inspect/1)}"
          )}
     end
   end

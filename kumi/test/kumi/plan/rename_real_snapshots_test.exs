@@ -26,6 +26,8 @@ defmodule Kumi.Plan.RenameRealSnapshotsTest do
     assert [{:possible_rename, "crm_accounts", ^old, ^new}] = Rename.detect(ops, @snapshot_dir)
 
     resolved = Rename.detect(ops, @snapshot_dir)
-    assert Format.format(resolved, verbose: true, snapshot_dir: @snapshot_dir) =~ "via: #{@snapshot_dir}"
+
+    assert Format.format(resolved, verbose: true, snapshot_dir: @snapshot_dir) =~
+             "via: #{@snapshot_dir}"
   end
 end

@@ -100,9 +100,11 @@ defmodule Kumi.Probe do
 
     %Finding{
       op: op,
-      query_description: "count(*) FROM #{table} (row count only — no cast probing for #{col.name})",
+      query_description:
+        "count(*) FROM #{table} (row count only — no cast probing for #{col.name})",
       count: count,
-      note: "#{count} rows total — whether they would cast cleanly to the new type was not checked"
+      note:
+        "#{count} rows total — whether they would cast cleanly to the new type was not checked"
     }
   end
 

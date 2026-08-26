@@ -38,9 +38,15 @@ defmodule Kumi.Desired.PgType do
   @spec precision_from_ash(module(), keyword()) :: 0 | 6 | nil
   def precision_from_ash(type, constraints) do
     case AshPostgres.MigrationGenerator.get_migration_type(type, constraints) do
-      migration_type when migration_type in [:utc_datetime, :naive_datetime, :time] -> 0
-      migration_type when migration_type in [:utc_datetime_usec, :naive_datetime_usec, :time_usec] -> 6
-      _other -> nil
+      migration_type when migration_type in [:utc_datetime, :naive_datetime, :time] ->
+        0
+
+      migration_type
+      when migration_type in [:utc_datetime_usec, :naive_datetime_usec, :time_usec] ->
+        6
+
+      _other ->
+        nil
     end
   end
 

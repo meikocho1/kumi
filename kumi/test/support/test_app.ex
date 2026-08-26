@@ -13,7 +13,7 @@ defmodule Kumi.Test.App do
 
   app do
     name :test_app
-    title "Test App"
+    title("Test App")
   end
 
   resources do
@@ -21,14 +21,14 @@ defmodule Kumi.Test.App do
   end
 
   admin do
-    navigation [Kumi.Test.Account]
+    navigation([Kumi.Test.Account])
   end
 
   workflow :onboarding do
-    stages [:invited, :active]
+    stages([:invited, :active])
   end
 
   dashboard :overview do
-    metric :account_count
+    metric(:account_count)
   end
 end

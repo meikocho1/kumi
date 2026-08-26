@@ -66,7 +66,12 @@ if Code.ensure_loaded?(Igniter) do
 
     defp mount_router(igniter) do
       app_module = Igniter.Project.Module.module_name(igniter, "App")
-      {igniter, router} = Igniter.Libs.Phoenix.select_router(igniter, "Which router should Kumi Admin be mounted in?")
+
+      {igniter, router} =
+        Igniter.Libs.Phoenix.select_router(
+          igniter,
+          "Which router should Kumi Admin be mounted in?"
+        )
 
       cond do
         router == nil ->
@@ -81,7 +86,10 @@ if Code.ensure_loaded?(Igniter) do
           """)
 
         already_mounted?(igniter, router) ->
-          Igniter.add_notice(igniter, "Kumi Admin: already mounted in #{inspect(router)} — leaving it untouched.")
+          Igniter.add_notice(
+            igniter,
+            "Kumi Admin: already mounted in #{inspect(router)} — leaving it untouched."
+          )
 
         true ->
           {igniter, auth_module} = detect_live_user_auth(igniter)

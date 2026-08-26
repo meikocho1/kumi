@@ -9,6 +9,7 @@ defmodule Kumi.PlanAppTest do
     plan = Kumi.plan_app(Kumi.Test.App)
 
     assert plan.entries == []
+
     refute Enum.any?(plan.entries, fn {op, _, _} ->
              match?({:drop_table, %{name: "kumi_test_deals"}}, op)
            end)

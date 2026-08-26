@@ -51,13 +51,13 @@ defmodule Kumi.Actual do
     repo
     |> query!(sql, [@excluded_table])
     |> Enum.group_by(fn [table, _, _, _, _, _] -> table end, fn [
-                                                                    _,
-                                                                    name,
-                                                                    nullable,
-                                                                    default,
-                                                                    type,
-                                                                    datetime_precision
-                                                                  ] ->
+                                                                  _,
+                                                                  name,
+                                                                  nullable,
+                                                                  default,
+                                                                  type,
+                                                                  datetime_precision
+                                                                ] ->
       %Column{
         name: name,
         type: type,
@@ -103,7 +103,12 @@ defmodule Kumi.Actual do
     |> Enum.group_by(
       fn [table, _, _, _, _] -> table end,
       fn [_, column, ref_table, ref_column, name] ->
-        %ForeignKey{name: name, column: column, references_table: ref_table, references_column: ref_column}
+        %ForeignKey{
+          name: name,
+          column: column,
+          references_table: ref_table,
+          references_column: ref_column
+        }
       end
     )
   end

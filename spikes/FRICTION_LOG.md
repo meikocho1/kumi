@@ -395,3 +395,64 @@
 | F77 | 対応：ファイル改変ではなく`Igniter.add_notice/2`に倒した | F76を受けて、「auto-mount不可の場合はルーターファイルに壊れたコメントを埋め込む」を諦め、`ash_admin.install`が「ルーターが見つからない」場合に使っているのと同じ手（`Igniter.add_warning/2`）を「auth検出できない」場合にも使うことにした——`Igniter.add_notice`でCLI出力に完全なコピペ用スニペットを出すだけで、ルーターファイルには一切触れない。副産物として冪等性の証明が自明になった（ファイルを変更していないので二回目の実行も同じ通知が出るだけで、重複の余地がそもそもない）。タスクの原文は「commented-out with a clear TODO comment」を指示していたが、AST経由のコメント挿入が実測で壊れる以上、「間違ったlive_session推測はTODOより悪い」という同タスクの原則を、ファイル改変そのものにも一段階上げて適用した——不正確な自動編集よりは「何もしないで正しい手順を見せる」方を選んだ、という判断をここに明記する。 | 中 |
 | F78 | auto-mount判定：モジュール存在だけでなくクローズを検証 | 当初案は「ホストに`<Web>.LiveUserAuth`が存在すれば`on_mount: [{LiveUserAuth, :current_user}]`で自動マウント」だったが、`:current_user`という`on_mount`節が実際にそのモジュールに定義されているかまでは見ていなかった。`ash_authentication_phoenix`の生成テンプレート（`spike0_crm_web/live_user_auth.ex`で実物確認）は確かに`on_mount(:current_user, ...)`を標準で持つが、モジュール名の一致だけでは「同名だが中身が違うカスタムLiveUserAuth」を誤検出しうる。`Igniter.Code.Function.function_call?(z, :on_mount, [4])`＋`argument_equals?(z, 0, :current_user)`でAST上に実際の節があることまで確認してから初めてlive-mountする形に直した。これにより「間違った推測」の余地はほぼゼロになった（該当節が無ければ機械的にTODO通知へフォールバック）。 | 中 |
 | F79 | 実地検証の結果 | `/private/tmp/kumi_install_check/spike0_crm_copy`（spike0_crmのthrowawayコピー、mix.exsのpath依存だけ絶対パスに書き換え）に対して`mix kumi.install`と`mix kumi_admin.install`を実行——両方とも「既にSpike0Crm.Appが存在」「既にSpike0CrmWeb.Routerにマウント済み」を検出して無変更（冪等性の実地証拠）。さらに`app.ex`を退避して`mix kumi.install --yes`を実行したところ、`otp_app`から`title "Spike0 Crm"`を導出した新規ファイルが生成され`mix compile`が通ることを確認、その後同じファイルに対して再実行しても無変更（生成パスと冪等パスの両方を実地で確認）。検証後はthrowawayコピーを削除、実物の`spikes/spike0_crm`ツリーは一切変更していない（`git status --short`で確認）。 | - |
+
+---
+
+# v0.4 — `mix kumi.report`（AI patchパイプラインの検証ハーネス）
+
+> 目的：Blueprint v3 §8「AI Integration」の中核——AI（外部）がsourceにpatchを当てた後、
+> `mix format` / `compile` / `test` / `ash.codegen` / `kumi.plan`を一気通貫で実行し、
+> 「Ready for PR」か「どこがダメか」を機械可読で返す`mix kumi.report`を実装する。
+> Kumiコア（`lib/kumi/`直下の既存モジュール）は無改変、新規ファイルの追加のみ。
+
+## `ash.codegen --check`の実体：Ash本体のflagで、`ash_postgres.generate_migrations --check`に委譲される
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F80 | `mix ash.codegen --check`は実在するAsh本体（`ash`パッケージ）のCLI flagだった——`deps/ash/lib/mix/tasks/ash.codegen.ex`のmoduledocに明記されており、動作は「ファイルを一切生成せず、生成すべきコードが残っていればexit(1)」。内部実装は`extension.codegen(argv)`という薄い委譲で、AshPostgresの場合`AshPostgres.DataLayer.codegen/1`が`Mix.Task.run("ash_postgres.generate_migrations", args)`に丸投げし、実際に`--check`を処理しているのは`ash_postgres.generate_migrations`タスク（moduledoc：「no files are created, returns an exit(1) code if the current snapshots and resources don't fit」）だった。タスク仕様が示唆していた「素朴に別物を発明せず実在のidiomを使う」がそのまま成立し、`kumi.report`の`codegen`ステップは`System.cmd("mix", ["ash.codegen", "--check"])`一行で完結した。 | 低 |
+
+## subprocess vs in-process：MIX_ENVはOS環境変数として自動伝播しない（実測で確認）——ただし`mix test`だけは強制してはいけない
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F81 | `mix test`実行中の`Mix.env()`は`:test`だが、そこから`System.cmd`で子プロセスを起動しても`MIX_ENV`というOS環境変数は子には見えない（`System.get_env("MIX_ENV")`が`nil`）——実際に最小再現スクリプトで確認した：親プロセス内では`Mix.env()`が`:test`を返すのに、`System.cmd("elixir", ["-e", "IO.puts(System.get_env(\"MIX_ENV\"))"]  )`は`unset`を出力する。MixはCLIのpreferred_cli_env機構で内部的に環境を決めるだけで、それをOS環境変数としてexportしない。このため`format`/`compile`/`codegen`の3ステップは`System.cmd("mix", args, env: [{"MIX_ENV", to_string(Mix.env())}])`で明示的に環境を渡す必要があった（渡さなければ`kumi.report`自身がどの環境で動いていようと子プロセスは常に`:dev`扱いになり、`--app`スコープの host アプリの設定と food違いが起きる）。 | 中 |
+| F82 | 一方`test`ステップにだけこの`MIX_ENV`強制を適用すると壊れる——実際にspike0_crmで`** (RuntimeError) cannot invoke sandbox operation with pool DBConnection.ConnectionPool`というクラッシュを引いた | 原因は単純：`mix kumi.report`をMIX_ENV未指定（＝`:dev`）で普通に叩くと`Mix.env()`は`:dev`になり、F81の対応でその値を`test`サブプロセスにも強制していたため、`mix test`が`config/dev.exs`（Sandboxプールではない通常のpool）で起動しようとして`Ecto.Adapters.SQL.Sandbox.mode/2`が失敗した。`mix test`だけはMix自身のpreferred_cli_env（常に`:test`）に委ね、環境変数を明示的に渡さない（＝ユーザーが`MIX_ENV=xxx`を明示していない限り自然に`:test`へフォールバックする）よう修正した——「4ステップとも一律に同じenvを渡す」という最初の素朴な実装が、`mix test`だけは例外だという事実を実測で教えてくれた。 | 中 |
+
+## `--json`のstdoutを汚す2つの実測バグ：Logger debugログとANSIカラーコード
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F83 | spike0_crmで`mix kumi.report --json`を実行すると、`Kumi.Actual`が発行する生SQLクエリの`[debug] QUERY ...`ログがJSON本体の前に大量に出力され、`Jason.decode!`できない壊れた出力になった | 原因はhostアプリ（spike0_crm）のdevロガー設定が`:debug`レベルであること——`plan`ステップはin-process（`Mix.Task.run("app.start")`後に`Kumi.plan`/`Kumi.plan_app`を直接呼ぶ）なので、Loggerの出力先はkumi.report自身の標準出力と同じであり、Mix.shell().infoで最後に出すJSONより先に紛れ込む。host側のロガー設定を変更するのは越権（`kumi.report`の責務外）なので、`plan_step/1`内だけ`Logger.configure(level: :warning)`で一時的に黙らせ、`try/after`で（例外時も含めて）必ず元のレベルへ戻す形にした。 | 中 |
+| F84 | `mix format --check-formatted`の失敗時diffはANSIカラーエスケープ（`[1m[31m`等）付きで出力され、そのまま`detail`文字列に載ると機械可読とは言い難い出力になっていた | AI/CIコンシューマ向けの`--json`契約を汚さないよう、`truncate/1`内で`~r/\e\[[0-9;]*m/`によるANSI除去を先にかけるよう直した。 | 低 |
+
+## kumiコア自身の`plan`ステップの構造的限界：`Kumi.Test.Repo`はkumiのOTP applicationに属さない
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F85 | kumiパッケージ自身に対して素の`mix kumi.plan`（`--app`なし）を単独で叩くと、ExUnitの外では`** (RuntimeError) could not lookup Ecto repo Kumi.Test.Repo because it was not started or it does not exist`で必ずクラッシュする——これは`kumi.report`の新規バグではなく、既存の`mix kumi.plan`にも実測で再現した既存の構造的事実 | `Kumi.Test.Repo`はtest/support配下のtest専用コードで、`test/test_helper.exs`が`Kumi.Test.Repo.start_link()`を手動で呼んで初めて起動する——`:kumi`というOTP application自体の`application/0`（`extra_applications: [:logger]`のみ）には一切含まれていないため、`Mix.Task.run("app.start")`では絶対に起動しない。つまり「kumiパッケージ自身のtest fixturesを本物のhostアプリのように`kumi.plan`/`kumi.report`で検証する」ことは、ExUnit経由（Repoが既に起動済み）以外では原理的に不可能——`kumi.report`の`plan_step/1`は素の`mix kumi.plan`と違い、この失敗を`rescue`で捕まえて`{status: :fail, detail: "could not build plan: ..."}`として穏当に報告する（verdictも`:blocked`ではなく正しく`:failed`に倒す——REVIEW/DANGEROUSの発見と「そもそも実行できなかった」を区別する設計、`Kumi.Report`のderive_verdict参照）。kumiパッケージ自身の統合テスト（`test/mix/tasks/kumi.report_test.exs`）はこの制約込みで「`plan`は`fail`、`format`は既存drift（F86）でfail、`verdict`は`failed`」という現実の状態を固定してアサートしている。 | 中 |
+
+## 発見：kumi・spike0_crm両方に既存のformat drift——`kumi.report`がこのプロジェクトで初めて`mix format --check-formatted`を実地で通した
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F86 | `kumi.report`の`format`ステップを実装して初めて分かったこと：kumiパッケージ自身で7ファイル、spike0_crmで9ファイルが`mix format --check-formatted`に「未フォーマット」と判定された——どちらも今回のスライスが触れていない既存ファイル（`git log`で該当ファイルの変更履歴を確認、直近のコミット以降ワーキングツリーの差分はゼロ）で、過去のどのスライスも`mix format --check-formatted`を実地で通したことがなかった（`mix test`のaliasにも`mix precommit`にも入っているが、これまでの検証コマンド列には登場していない）ため気づかれずに残っていた。「kumi coreを触らない」というタスクのHard rulesに従い、kumiパッケージ側の7ファイルは未修正のまま残し、`format: fail`が実地の`verdict: failed`として記録・テスト化されている（F85参照）。spike0_crm側の9ファイルは実物のツリーには一切手を入れず（バックアップ→`mix format`→動作確認→即座に`git status --short`でゼロ差分になるまで復元、を実施）、「readyのverdictを実地デモする」ためだけにF79と同じthrowawayコピー（`/private/tmp/kumi_report_check/spike0_crm_copy`）上でフォーマットして使い捨てた。 | 中 |
+| F87 | `mix format`自体が同一ファイルに対して非決定的に見える瞬間があった——`test/spike0_crm/crm/note_test.exs`の1行（`Ash.Changeset.for_create`のパイプ呼び出し）で、`mix format <file>`直後の`mix format --check-formatted`は通るのに、直後に`mix kumi.report`（＝別のmix起動、内部で改めて`mix format --check-formatted`を子プロセス実行）を叩くと同じ行が再び「未フォーマット」と判定され、しかも提示される「正しい」整形結果が1回目とは異なる形だった | `MIX_ENV`を明示的に変えても再現/解消せず（`unset` / `dev` / `test`すべてで一度は成功）、数回`mix format`を往復させると収束して以降は安定した——おそらくSpark.Formatterプラグインが絡む行のAST整形が、直前のコンパイル状態（warm/cold）に依存してごく稀に非決定的な出力を出す、という与太話以上の原因究明はできていない（Elixir/Spark側の既知issueかは未調査）。実務上の回避策は「`mix format`→`mix format --check-formatted`を同一セッションで2〜3回繰り返して収束を確認してから使う」——これは`kumi.report`の実装バグではなく`mix format`自体の挙動なので、`kumi.report`側で対処すべき問題ではないと判断し、これ以上の深掘りはしなかった。 | 中 |
+
+## Elixir 1.20のExUnitサマリ行フォーマット変更——`"N tests, M failures"`はもう存在しない
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F88 | `test`ステップの`detail`を「テスト件数のサマリ1行」に切り詰めるため、当初`~r/\d+ tests?,\s*\d+ failures?/`という正規表現でパースしていたが、spike0_crmに対して実地で`mix kumi.report`（`--skip-tests`を外した完全版）を実行して初めて、この正規表現が一度もマッチしていないことに気づいた——マッチしないとフォールバックの`truncate/1`（ExUnit実行ログの生出力を最大20行そのまま）に落ちるため、バグとしては「動くが冗長」という形で隠れていた | 原因はElixir 1.20で新規追加された`ExUnit.CLIFormatter`（`deps/ex_unit/lib/ex_unit/cli_formatter.ex`のコメントに仕様あり）——サマリ行が旧来の`"32 tests, 0 failures"`から`"Result: 32 passed"`（全成功時）/`"Result: 30/32 passed"`+別行`"Failed: 2 tests"`（失敗時）という新フォーマットに変わっていた。正規表現を`~r/Result:[^\n]*(?:\nFailed:[^\n]*)?/`に直し、実地で`"Result: 32 passed"`という簡潔な1行が`detail`に載ることを確認した。「モデルの知識にある定番文字列を検証なしで正規表現に落とす」ことの典型的な失敗例として記録する。 | 低 |
+
+## 検証結果
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F89 | Go/No-Go判定 | `kumi`パッケージは119テスト全green（既存105＋新規14：`report_test.exs`7・`report/format_test.exs`2・`report/json_test.exs`4・`mix/tasks/kumi.report_test.exs`1）、`mix compile --warnings-as-errors`クリーン（新規ファイルのみ、既存の未フォーマット7ファイルはF86の通り既存drift）。`kumi_admin`は31テスト全green（無改変）。`spike0_crm`は32テスト全green（無改変、`git status --short`でワーキングツリー差分ゼロを確認）。実地検証は`mix kumi.report`をspike0_crm（および、readyデモ用にF79と同じthrowawayコピー）に対して実行——(1) 清潔な状態：`--skip-tests`ありで`verdict: ready`（exit 0）、`--skip-tests`なしの完全版で`test`ステップが実際の`mix test`（32 passed）を実行した上でも`verdict: ready`（exit 0）、(2) `crm_accounts`テーブルに`legacy_migration_notes`列を`ALTER TABLE ADD COLUMN`で注入した状態：`verdict: blocked`（exit 1）、`plan.operations`に`{"description": "remove_column crm_accounts.legacy_migration_notes", "level": "dangerous", ...}`が1件、(3) `ALTER TABLE DROP COLUMN`で復元後：再び`verdict: ready`（exit 0）——を確認した。DB操作は全て`spike0_crm_dev`（localhost:5434、kumi_db docker）に対してのみ行い、注入と復元後の両方で`\d crm_accounts`により実カラム構成を目視確認した。 | - |
+
+## 率直な評価：AIエージェントがこのレポートだけを見て次の一手を判断できるか
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F90 | 十分な点：steps[]配列の各要素が独立したpass/fail/skippedと理由を持ち、`verdict`一語で「PR出していいか」の最終判断が付く、`plan.operations`はREVIEW/DANGEROUSだけに絞られていて「何を直せばいいか」が明示される——AIエージェントが「format直して」「このカラム消していいか人間に聞いて」レベルの次アクションを選ぶには足りる情報量だと判断した | 今回の実地検証（F89）で実際に`verdict: blocked`＋`plan.operations`だけを見て「`legacy_migration_notes`が原因」と機械的に特定できることを確認済み——JSON以外の情報（ログを別途grepする等）を必要としなかった。 | - |
+| F91 | 不十分な点：(1) `test`ステップの`detail`は成功時こそ簡潔（`"Result: 32 passed"`）だが、失敗時は`Result:`/`Failed:`の2行サマリのみで「どのテストが」「どのファイルの何行目で」失敗したかという構造化情報（テスト名・file:line・assertion diff）が一切ない——AIエージェントが実際に修正のためのpatchを書くには、結局`mix test`を自分でもう一度実行してログ全文を読み直す必要がある。(2) `detail`は20行で`truncate`される（ponytailコメント通り、意図的な簡略化）——`compile`の警告が21行以上のときAIは全文を失い、再実行するしかない。(3) パッチ適用「前」と「後」のdiffをこのレポート自体は一切持たない——「何が変わったからこの結果になったか」はAI側がpatchそのものを別途保持しておく前提になっており、`kumi.report`単体はステートレスなスナップショット判定しかできない。(4) REVIEW（人間の目が必要だが破壊的ではない）とDANGEROUS（データ損失）が`plan.operations`の中で`level`フィールドでしか区別されず、exit codeのレベルでは両方とも同じ「非0」に潰れる——CIがREVIEWは警告扱い・DANGEROUSは即ブロックのように差をつけたい場合、`--json`をパースしてlevelを見るしかない。総合すると「機械可読な一次判定」としては実地で機能したが、「AIがこれだけを見てpatchを直接書き直せる」水準には未達で、次のスライスがあるなら(1)のテスト失敗の構造化（`ExUnit.Formatter`のraw resultsを保持する等）が最優先だと考える。 | - |

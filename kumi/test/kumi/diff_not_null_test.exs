@@ -7,10 +7,15 @@ defmodule Kumi.DiffNotNullTest do
   alias Kumi.Schema.{Column, Table}
 
   test "actual column is nullable, desired requires NOT NULL -> change_column reports the tightening" do
-    desired = [%Table{name: "t", columns: [%Column{name: "email", type: "text", nullable: false}]}]
+    desired = [
+      %Table{name: "t", columns: [%Column{name: "email", type: "text", nullable: false}]}
+    ]
+
     actual = [%Table{name: "t", columns: [%Column{name: "email", type: "text", nullable: true}]}]
 
-    assert [{:change_column, "t", %Column{name: "email"}, changes}] = Kumi.Diff.diff(desired, actual)
+    assert [{:change_column, "t", %Column{name: "email"}, changes}] =
+             Kumi.Diff.diff(desired, actual)
+
     assert {:nullable, false, true} in changes
   end
 end

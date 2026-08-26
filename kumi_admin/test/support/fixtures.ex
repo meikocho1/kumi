@@ -99,7 +99,7 @@ defmodule KumiAdmin.Test.App do
 
   app do
     name :fixture
-    title "Fixture App"
+    title("Fixture App")
   end
 
   resources do
@@ -108,6 +108,6 @@ defmodule KumiAdmin.Test.App do
   end
 
   admin do
-    navigation [KumiAdmin.Test.Account, KumiAdmin.Test.Contact]
+    navigation([KumiAdmin.Test.Account, KumiAdmin.Test.Contact])
   end
 end

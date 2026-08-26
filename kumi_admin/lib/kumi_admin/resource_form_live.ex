@@ -63,7 +63,13 @@ defmodule KumiAdmin.ResourceFormLive do
   defp load_form(socket, id) do
     case socket.assigns.resource do
       nil ->
-        assign(socket, error: :not_found, mode: nil, fields: [], form: nil, belongs_to_options: %{})
+        assign(socket,
+          error: :not_found,
+          mode: nil,
+          fields: [],
+          form: nil,
+          belongs_to_options: %{}
+        )
 
       resource ->
         if id, do: edit_form(socket, resource, id), else: new_form(socket, resource)
@@ -132,7 +138,9 @@ defmodule KumiAdmin.ResourceFormLive do
   defp select?({:belongs_to, _}), do: true
   defp select?(_), do: false
 
-  defp select_options({:select, values}, _options), do: Enum.map(values, &{Phoenix.Naming.humanize(&1), &1})
+  defp select_options({:select, values}, _options),
+    do: Enum.map(values, &{Phoenix.Naming.humanize(&1), &1})
+
   defp select_options({:belongs_to, _relationship}, options), do: options
 
   defp truthy?(value), do: value in [true, "true", "on"]
@@ -233,7 +241,13 @@ defmodule KumiAdmin.ResourceFormLive do
         No access or no record.
       </p>
 
-      <.form :if={is_nil(@error)} for={@form} id="resource-form" phx-change="validate" phx-submit="save">
+      <.form
+        :if={is_nil(@error)}
+        for={@form}
+        id="resource-form"
+        phx-change="validate"
+        phx-submit="save"
+      >
         <div :for={field <- @fields} class="kumi-admin-field">
           <label class="kumi-admin-field-label" for={@form[field.attribute.name].id}>
             {Phoenix.Naming.humanize(field.attribute.name)}

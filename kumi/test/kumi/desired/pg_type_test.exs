@@ -17,7 +17,8 @@ defmodule Kumi.Desired.PgTypeTest do
     end
 
     test "decimal -> numeric" do
-      assert PgType.from_ash(Ash.Type.Decimal, precision: :arbitrary, scale: :arbitrary) == "numeric"
+      assert PgType.from_ash(Ash.Type.Decimal, precision: :arbitrary, scale: :arbitrary) ==
+               "numeric"
     end
 
     test "atom -> text (stored as string, not the atom name)" do

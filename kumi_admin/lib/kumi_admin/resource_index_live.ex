@@ -30,7 +30,8 @@ defmodule KumiAdmin.ResourceIndexLive do
       |> assign(app: context.app, mount_path: context.mount_path)
       |> assign(actor: context.actor, resource: context.resource, offset: 0, search: "")
       |> assign(
-        can_create?: !!context.resource && KumiAdmin.Capability.can_create?(context.resource, context.actor)
+        can_create?:
+          !!context.resource && KumiAdmin.Capability.can_create?(context.resource, context.actor)
       )
       |> load_page()
 
@@ -103,7 +104,13 @@ defmodule KumiAdmin.ResourceIndexLive do
         phx-submit="search"
         class="kumi-admin-search"
       >
-        <input type="search" name="q" value={@search} placeholder="Search…" class="kumi-admin-input" />
+        <input
+          type="search"
+          name="q"
+          value={@search}
+          placeholder="Search…"
+          class="kumi-admin-input"
+        />
       </form>
 
       <p :if={@error == :not_found} class="kumi-admin-empty">

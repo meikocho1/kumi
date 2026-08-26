@@ -17,11 +17,11 @@ defmodule Kumi.AppVerifiersTest do
         end
 
         workflow :w do
-          stages [:a]
+          stages([:a])
         end
 
         dashboard :d do
-          metric :m
+          metric(:m)
         end
       end
     end
@@ -58,7 +58,7 @@ defmodule Kumi.AppVerifiersTest do
         end
 
         admin do
-          navigation [Kumi.Test.Deal]
+          navigation([Kumi.Test.Deal])
         end
       end
     end
@@ -121,11 +121,11 @@ defmodule Kumi.AppVerifiersTest do
         end
 
         workflow :dup do
-          stages [:a]
+          stages([:a])
         end
 
         workflow :dup do
-          stages [:b]
+          stages([:b])
         end
       end
     end
@@ -141,11 +141,11 @@ defmodule Kumi.AppVerifiersTest do
         end
 
         dashboard :dup do
-          metric :m1
+          metric(:m1)
         end
 
         dashboard :dup do
-          metric :m2
+          metric(:m2)
         end
       end
     end
