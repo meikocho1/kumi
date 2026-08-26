@@ -48,7 +48,9 @@ defmodule KumiAdmin.Router do
         session: {KumiAdmin.Router, :__session__, [path, app, actor_fun]} do
         live path, KumiAdmin.DashboardLive, :dashboard
         live "#{path}/:resource", KumiAdmin.ResourceIndexLive, :index
+        live "#{path}/:resource/new", KumiAdmin.ResourceFormLive, :new
         live "#{path}/:resource/:id", KumiAdmin.ResourceShowLive, :show
+        live "#{path}/:resource/:id/edit", KumiAdmin.ResourceFormLive, :edit
       end
     end
   end

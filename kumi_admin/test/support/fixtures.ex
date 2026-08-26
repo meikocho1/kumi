@@ -22,7 +22,7 @@ defmodule KumiAdmin.Test.Widget do
   end
 
   actions do
-    defaults [:read, create: :*]
+    defaults [:read, :destroy, create: :*, update: :*]
   end
 
   attributes do
@@ -34,6 +34,15 @@ defmodule KumiAdmin.Test.Widget do
     attribute :e, :string, public?: true
     attribute :f, :string, public?: true
     attribute :hidden, :string, public?: false
+    attribute :description, :string, public?: true
+    attribute :active, :boolean, public?: true
+    attribute :scheduled_on, :date, public?: true
+    attribute :price, :decimal, public?: true
+
+    attribute :status, :atom do
+      public? true
+      constraints one_of: [:draft, :published]
+    end
   end
 end
 
@@ -49,7 +58,7 @@ defmodule KumiAdmin.Test.Account do
   end
 
   actions do
-    defaults [:read, create: :*]
+    defaults [:read, :destroy, create: :*, update: :*]
   end
 
   attributes do
@@ -59,7 +68,7 @@ defmodule KumiAdmin.Test.Account do
 end
 
 defmodule KumiAdmin.Test.Contact do
-  @moduledoc "Fixture Ash resource for `KumiAdmin.Test.App`."
+  @moduledoc "Fixture Ash resource for `KumiAdmin.Test.App`. Carries a `belongs_to` so form-field derivation can be tested against a real relationship."
 
   use Ash.Resource,
     domain: KumiAdmin.Test.Domain,
@@ -70,12 +79,16 @@ defmodule KumiAdmin.Test.Contact do
   end
 
   actions do
-    defaults [:read, create: :*]
+    defaults [:read, :destroy, create: :*, update: :*]
   end
 
   attributes do
     uuid_primary_key :id
     attribute :name, :string, public?: true
+  end
+
+  relationships do
+    belongs_to :account, KumiAdmin.Test.Account, public?: true
   end
 end
 

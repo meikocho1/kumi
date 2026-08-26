@@ -339,3 +339,43 @@
 | # | 領域 | 事実 | 摩擦度 |
 |---|---|---|---|
 | F66 | Go/No-Go判定 | 新規`kumi_admin`パッケージは13テスト全green（`slug_test.exs`3・`label_test.exs`4・`columns_test.exs`2・`format_test.exs`4）、`mix compile --warnings-as-errors`クリーン（upstream依存の警告を除く）。`kumi`コアパッケージは無改変・103テスト全green。`spike0_crm`側は25テスト全green（既存20＋新規5：`kumi_admin_live_test.exs`——sidebar/nav描画・actor付きaccount一覧・actorなしでの`No access or no records.`描画・detail画面の属性描画・dashboard画面のmetric名描画）、`mix compile --warnings-as-errors`もクリーン。`mix phx.routes \| grep kumi-admin`で`/kumi-admin`（dashboard）・`/kumi-admin/:resource`（index）・`/kumi-admin/:resource/:id`（show）の3ルートがマウント済みであることを確認した。 | - |
+
+---
+
+# v0.3 — Kumi Admin shell slice 2 — Forms / Search
+
+> 目的：Blueprint v3 §5「List / Form / Detail / Search」のうち、slice 1が空けたまま残した
+> フォーム（create/update）・削除・検索・ボタン単位の権限表示を実装し、
+> 「開けばもう製品」に一枚近づけるかを確認する。`kumi`コアは無改変。新規依存は`ash_phoenix`のみ（`kumi_admin`）。
+
+## `AshPhoenix.Form`が無料でくれるもの：validate-on-change・field単位のエラー・`{:error, form}`ラウンドトリップ
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F67 | `AshPhoenix.Form.for_create/3`・`for_update/3`・`validate/2`・`submit/2`はすべて`%Phoenix.HTML.Form{}`を直接受け取れるオーバーロードを持ち、`socket.assigns.form`をそのまま渡すだけで完結した——自前のchangeset往復コードは1行も書いていない | 実装した`KumiAdmin.ResourceFormLive`のイベントハンドラは`handle_event("validate", %{"form" => params}, socket)`→`AshPhoenix.Form.validate(socket.assigns.form, params)`、`handle_event("save", ...)`→`AshPhoenix.Form.submit(socket.assigns.form, params: params)`の2行がロジックの全て。`submit/2`は成功時`{:ok, record}`、失敗時`{:error, %Phoenix.HTML.Form{}}`（すでに`to_form`済み、そのまま`assign(form: form)`できる）を返すため、「エラー時にどう再描画用のformを作り直すか」という定番の面倒がゼロだった。フィールド単位のエラーも`@form[field_name].errors`（`Phoenix.HTML.FormField`が自動的にフィールドへ振り分け済み）を読むだけで、`Ecto.Changeset.traverse_errors`相当の手作業が不要——`%{msg, opts}`から`%{count}`等のプレースホルダを埋める`translate_error/1`（5行）だけ自前で書いた（core_componentsの定番パターンと同一）。 | 低 |
+| F68 | `belongs_to`の外部キー（例：`Contact.account_id`）は「生の`:uuid`属性」としてしか見えず、related recordのselect optionsは自前で`Ash.read`する必要があった——`AshPhoenix.Form`にrelationship専用のselect生成機能はない | `AshPhoenix.Form`は`manage_relationship`引数を持つカスタムactionに対する`inputs_for`（ネストしたsub-form）は提供するが、今回のCRM4リソースは全て`belongs_to`をプレーンな外部キー属性（`accept: :*`経由）として公開しているだけで、`manage_relationship`引数は使っていない。そのため`account_id`はFormFields側では単なる`:uuid`型の属性にしか見えず、「これはbelongs_toの外部キーだから選択肢を出す」という判断は`Ash.Resource.Info.public_relationships/1`を`source_attribute`でマッチングして`KumiAdmin.FormFields`側に実装する必要があった（15行程度）。related recordの読み込み（`Ash.Query.limit(100)`でcap）・ラベル選定（`:name`があればname、なければid——`ResourceShowLive`の`relationship_display/1`と全く同じ判定なので`Format.record_label/1`に切り出して共有した）も`KumiAdmin.ResourceFormLive`側の自前ロジック。ここは「Ashが用意していない部分」であり、KumiAdmin側の付加価値として素直に評価できる。 | 中 |
+
+## OR-across-fields検索：`Ash.Query.filter/2`はmacroなので動的フィールドリストには使えない——`filter_input/2`（map/keyword syntax）に倒すと一発で解決した
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F69 | 最初の想定（`Ash.Query.filter(query, expr(contains(name, ^term) or contains(email, ^term)))`）は、フィールドの集合が実行時（resourceごとに違う）にしか分からないため、そもそも書けなかった——`filter/2`はコンパイル時にASTを受け取るmacroであるため | `Ash.Query.filter/2`はAST（`do: body`または`expression`）を受け取るmacroで、`Ash.Query.filter(query, contains(^field_atom, ^term))`のように「どのフィールドを見るか」自体を実行時の変数にすることはできない（`^field_atom`はフィールド名ではなく値のpinとしてしか解釈されない）。ここで一段詰まりかけたが、`ash/lib/ash/query/query.ex`の`filter_input/2`のdocstring（「filter added as user input... use the keyword/map style syntax」）を読み、これはASTではなく**プレーンな実行時データ**（`[or: [[name: [contains: term]], [email: [contains: term]]]]`というただのkeyword list）を受け取ることに気づいた——`Enum.map(searchable_fields, &{&1, [contains: term]})`でリストを組み立てるだけで、macro/AST操作は一切不要だった。`KumiAdmin.Search.apply/3`は10行で完結。 | 中 |
+| F70 | 大文字小文字を無視した検索は「両辺をdowncaseする」自前ロジックではなく、検索語を`Ash.CiString.new/1`でラップするだけで実現できた——`contains/2`が`[:string, :ci_string]`という引数シグネチャを型ごとに複数持つ関数だったため | `Ash.Query.Function.Contains`のmoduledocに`contains("foo", %Ash.CiString{string: "FOO"})`が`true`になる例があり、これは「片方がci_stringなら大小無視」という意味だと分かった。実装は`[contains: Ash.CiString.new(term)]`と検索語側だけをci_stringにラップするだけ（フィールド側の`:string`属性はそのまま）。`spike0_crm`の`kumi_admin_live_test.exs`の検索テスト（"Acme Corp"を`"acme"`で検索してヒットする）を実DB（AshPostgres）に対して実行し、ケース非依存でマッチすることを確認済み——理論だけでなく実測で通った。`Ash.Query.filter_input`のmap/keyword syntaxが構造体値（`%Ash.CiString{}`）をそのまま受け取って正しい関数シグネチャにマッチさせてくれる、というのは事前には確信が持てなかった部分だが、実測で1回で通った。 | 低 |
+
+## `Ash.can?/3`はボタンの出し分けに十分軽量だった——ただし「後で実際にsubmitして初めて分かる」ケースは残る
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F71 | `Ash.can?({resource, action_name}, actor)`（作成用）／`Ash.can?({record, action_name}, actor)`（更新・削除用）の2パターンだけで、New/Edit/Deleteボタンの出し分けが完結した——`KumiAdmin.Capability`は40行未満 | 4つのCRM resource全てのpolicyが`policy always() do authorize_if actor_present() end`という単純な形（actor有無だけで決まる）だったため、`Ash.can?`は追加のDBクエリなしで即座にbooleanを返した（`actor_present()`はrunする前に判定できる静的チェック）。actorなしでのindex/detail画面テスト（F71用に追加した`"without an actor, new/edit/delete buttons are absent..."`）で、New/Edit/Deleteの3ボタンが揃って消えることを確認した。ただし`Ash.can?`はdocstringで「runtime check（action実行後にしか判定できないcheck）がある場合は`:maybe`を返し、`can?/3`はそれを`true`として扱う」と明記されており、より複雑なpolicy（レコードの値に依存するcheckなど）を持つresourceでは「ボタンは出るが実際にsubmitすると弾かれる」ケースが原理的に残る——今回のCRMではこのケースは踏んでいないが、`Ash.Resource.Info.primary_action/2`が`nil`を返す場合（actionそのものが存在しない）と合わせて`safe_can?/2`は`rescue`で例外時もボタンを出す側に倒し、「本当に判断できないときはsubmit時のflashに委ねる」という設計をタスク仕様通りに実装した。 | 低 |
+
+## 検証結果
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F72 | Go/No-Go判定 | `kumi`コアパッケージは無改変・103テスト全green。`kumi_admin`パッケージは27テスト全green（既存13＋新規14：`form_fields_test.exs`——`for_action/2`のaccept交差・宣言順維持・belongs_to外部キーの型上書き3件、`widget/2`の型別分岐11件）、`mix compile --warnings-as-errors`クリーン（`ash_phoenix`自体のコンパイル時に出る型警告はdeps側のものでこちらの責任範囲外）。`spike0_crm`側は32テスト全green（既存25＋新規7：`kumi_admin_live_test.exs`——フォーム経由のaccount作成→detail遷移・必須項目未入力時のinlineバリデーションエラー・編集による更新・削除→list遷移・検索によるフィルタ・actorなしでのボタン非表示・`belongs_to`/`decimal`/`atom select`の3種ウィジェットを同時に持つdeal作成フォームのスモークテスト）、`mix compile --warnings-as-errors`もクリーン。`mix phx.routes \| grep kumi-admin`で新規2ルート（`/kumi-admin/:resource/new`・`/kumi-admin/:resource/:id/edit`）を含む5ルートを確認した。 | - |
+
+## 率直な評価：「開けばもう製品」にどこまで近づいたか
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F73 | フォーム・検索・削除・ボタン単位の権限表示が入り、CRUD一通り＋検索が揃ったことで「読むだけの管理画面」から「日常業務が回るCRUD画面」へは一歩進んだが、Blueprint §5が挙げる残り（Saved views・Actions（ドメイン固有の業務アクション）・Notifications・Theme・Responsive）はまだ全てゼロ | 今回の実装でAshAdmin比の差別化点にもう1つ加わったのは「ボタン単位のAsh.can?ゲーティング」——AshAdminはsuper-admin用途である以上、目の前のactorが個々のレコードに対して何ができないかを事前に隠す理由がなく、実際そうしていない（触ってみて初めて拒否される）。KumiAdminはこれを標準の振る舞いにした。一方でPayloadの「開けばもう製品」という基準に照らすと、(1) 検索は文字列属性の`contains`のみで、日付範囲・数値範囲・関連先での絞り込みはまだない、(2) フォームのwidgetはHTML標準input任せで、日付ピッカーやrich textのようなUXの作り込みは一切ない、(3) ページングは件数不明の簡易next/prevのまま（F63から変更なし）、(4) Saved views・通知・テーマは概念すら存在しない——という現在地は変わらず正直に記録しておく。「Ashの素のCRUDより明らかに製品寄り」だが「Payload/Retoolのような完成された管理画面製品」にはまだ複数マイルストーン distance がある、というのが2スライス終了時点の評価。 | - |

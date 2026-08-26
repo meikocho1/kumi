@@ -28,4 +28,18 @@ defmodule KumiAdmin.Format do
   @doc "Formats a datetime as `YYYY-MM-DD HH:MM`."
   @spec short_datetime(DateTime.t() | NaiveDateTime.t()) :: String.t()
   def short_datetime(value), do: Calendar.strftime(value, "%Y-%m-%d %H:%M")
+
+  @doc """
+  A human label for a record: its `:name` field when present and
+  non-blank, else its (truncated) id. Same "name-ish field else id"
+  heuristic used for `belongs_to` display on the detail page and for
+  `belongs_to` select options on the form.
+  """
+  @spec record_label(struct()) :: String.t()
+  def record_label(record) do
+    case Map.get(record, :name) do
+      name when is_binary(name) and name != "" -> name
+      _ -> truncate_id(record.id)
+    end
+  end
 end

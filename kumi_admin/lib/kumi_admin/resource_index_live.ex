@@ -28,7 +28,10 @@ defmodule KumiAdmin.ResourceIndexLive do
     socket =
       socket
       |> assign(app: context.app, mount_path: context.mount_path)
-      |> assign(actor: context.actor, resource: context.resource, offset: 0)
+      |> assign(actor: context.actor, resource: context.resource, offset: 0, search: "")
+      |> assign(
+        can_create?: !!context.resource && KumiAdmin.Capability.can_create?(context.resource, context.actor)
+      )
       |> load_page()
 
     {:ok, socket}
@@ -42,6 +45,10 @@ defmodule KumiAdmin.ResourceIndexLive do
     {:noreply, socket |> update(:offset, &max(&1 - @page_size, 0)) |> load_page()}
   end
 
+  def handle_event("search", %{"q" => term}, socket) do
+    {:noreply, socket |> assign(search: term, offset: 0) |> load_page()}
+  end
+
   defp load_page(socket) do
     case socket.assigns.resource do
       nil ->
@@ -49,10 +56,12 @@ defmodule KumiAdmin.ResourceIndexLive do
 
       resource ->
         columns = KumiAdmin.Columns.for_resource(resource)
+        search_fields = KumiAdmin.Search.searchable_fields(resource)
 
         query =
           resource
           |> Ash.Query.sort(:id)
+          |> KumiAdmin.Search.apply(search_fields, socket.assigns.search)
           |> Ash.Query.limit(@page_size + 1)
           |> Ash.Query.offset(socket.assigns.offset)
 
@@ -74,9 +83,28 @@ defmodule KumiAdmin.ResourceIndexLive do
   def render(assigns) do
     ~H"""
     <Shell.shell app={@app} mount_path={@mount_path} active_resource={@resource}>
-      <h1 class="kumi-admin-title">
-        {@resource && KumiAdmin.Label.plural(@resource)}
-      </h1>
+      <div class="kumi-admin-actions">
+        <h1 class="kumi-admin-title">
+          {@resource && KumiAdmin.Label.plural(@resource)}
+        </h1>
+        <a
+          :if={@can_create?}
+          href={"#{@mount_path}/#{KumiAdmin.Slug.for_resource(@resource)}/new"}
+          class="kumi-admin-button"
+        >
+          New
+        </a>
+      </div>
+
+      <form
+        :if={is_nil(@error) or @error == :forbidden}
+        id="search-form"
+        phx-change="search"
+        phx-submit="search"
+        class="kumi-admin-search"
+      >
+        <input type="search" name="q" value={@search} placeholder="Search…" class="kumi-admin-input" />
+      </form>
 
       <p :if={@error == :not_found} class="kumi-admin-empty">
         Unknown resource.

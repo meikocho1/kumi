@@ -13,6 +13,7 @@ defmodule KumiAdmin.Components.Shell do
   attr :app, :atom, required: true
   attr :mount_path, :string, required: true
   attr :active_resource, :atom, default: nil
+  attr :flash, :map, default: %{}
   slot :inner_block, required: true
 
   def shell(assigns) do
@@ -38,6 +39,12 @@ defmodule KumiAdmin.Components.Shell do
         </ul>
       </nav>
       <main class="kumi-admin-content">
+        <p :if={Phoenix.Flash.get(@flash, :info)} class="kumi-admin-flash kumi-admin-flash-info">
+          {Phoenix.Flash.get(@flash, :info)}
+        </p>
+        <p :if={Phoenix.Flash.get(@flash, :error)} class="kumi-admin-flash kumi-admin-flash-error">
+          {Phoenix.Flash.get(@flash, :error)}
+        </p>
         {render_slot(@inner_block)}
       </main>
     </div>
@@ -65,6 +72,18 @@ defmodule KumiAdmin.Components.Shell do
     .kumi-admin-field-label { display: block; font-size: 0.8rem; color: #666; text-transform: uppercase; letter-spacing: 0.03em; }
     .kumi-admin-field-value { display: block; }
     .kumi-admin-back-link { display: inline-block; margin-bottom: 1rem; }
+    .kumi-admin-actions { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 1rem; }
+    .kumi-admin-actions .kumi-admin-title { margin: 0; }
+    .kumi-admin-button { display: inline-block; padding: 0.4rem 0.9rem; border-radius: 4px; border: 1px solid #333; background: #1a1a1a; color: #fff; text-decoration: none; font: inherit; cursor: pointer; }
+    .kumi-admin-button:hover { opacity: 0.85; }
+    .kumi-admin-button-danger { background: #fff; color: #b00020; border-color: #b00020; }
+    .kumi-admin-search { margin-bottom: 1rem; }
+    .kumi-admin-input { padding: 0.4rem 0.6rem; border: 1px solid #ccc; border-radius: 4px; font: inherit; width: 100%; max-width: 320px; box-sizing: border-box; }
+    .kumi-admin-checkbox { width: auto; max-width: none; }
+    .kumi-admin-field-error { color: #b00020; font-size: 0.85rem; margin: 0.25rem 0 0; }
+    .kumi-admin-flash { padding: 0.6rem 0.9rem; border-radius: 4px; margin-bottom: 1rem; }
+    .kumi-admin-flash-info { background: #e6f4ea; color: #1e4620; }
+    .kumi-admin-flash-error { background: #fce8e6; color: #b00020; }
     """
   end
 end
