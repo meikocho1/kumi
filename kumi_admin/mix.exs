@@ -25,7 +25,8 @@ defmodule KumiAdmin.MixProject do
       {:ash, "~> 3.0"},
       {:ash_phoenix, "~> 2.0"},
       {:phoenix, "~> 1.8"},
-      {:phoenix_live_view, "~> 1.0"}
+      {:phoenix_live_view, "~> 1.0"},
+      {:igniter, "~> 0.6", optional: true}
     ]
   end
 end

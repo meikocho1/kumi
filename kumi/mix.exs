@@ -31,7 +31,8 @@ defmodule Kumi.MixProject do
       {:spark, "~> 2.0"},
       {:jason, "~> 1.4"},
       {:ecto_sql, "~> 3.13"},
-      {:postgrex, ">= 0.0.0"}
+      {:postgrex, ">= 0.0.0"},
+      {:igniter, "~> 0.6", optional: true}
     ]
   end
 

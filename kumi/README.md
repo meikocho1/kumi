@@ -24,20 +24,36 @@ not replace it.
 
 ## Quick start
 
-Not on Hex yet — use a path or git dependency:
+Not on Hex yet, so `mix igniter.install kumi` doesn't resolve a package
+yet — use a path dependency plus the installer directly:
 
 ```elixir
 # mix.exs
 {:kumi, path: "../kumi"}
 ```
 
-Then, in any app with AshPostgres-backed resources:
+```bash
+mix deps.get
+mix kumi.install   # generates lib/<app>/app.ex — a `use Kumi.App` skeleton
+```
+
+(Once published to Hex, `mix igniter.install kumi` will do both steps —
+add the dependency and run the installer — in one command, the same way
+`mix igniter.install ash` works today.)
+
+Add your Ash resources to the generated `resources do ... end` block, then:
 
 ```bash
 mix kumi.plan            # human-readable plan
 mix kumi.plan --verbose  # + provenance for each judgment
 mix kumi.plan --check    # CI: exit 1 if anything needs REVIEW or is DANGEROUS
 ```
+
+Want the admin UI too? Add `{:kumi_admin, path: "../kumi_admin"}` and run
+`mix kumi_admin.install` — it mounts `KumiAdmin.Router`'s `kumi_admin/2`
+into your Phoenix router (auto-wiring the actor when it can confirm an
+`ash_authentication_phoenix`-style `LiveUserAuth` hook, otherwise printing
+the exact mount snippet to add yourself instead of guessing).
 
 Example output:
 
