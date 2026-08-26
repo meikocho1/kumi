@@ -16,7 +16,7 @@ defmodule Kumi.PrecisionDriftTest do
       []
     )
 
-    desired = Kumi.Desired.extract([Kumi.Test.Domain])
+    desired = Kumi.Desired.extract([Kumi.Test.Domain, Kumi.Test.ResourceDomain])
     actual = Kumi.Actual.introspect(Kumi.Test.Repo)
     diff = Kumi.Diff.diff(desired, actual)
 
@@ -34,7 +34,7 @@ defmodule Kumi.PrecisionDriftTest do
       []
     )
 
-    desired = Kumi.Desired.extract([Kumi.Test.Domain])
+    desired = Kumi.Desired.extract([Kumi.Test.Domain, Kumi.Test.ResourceDomain])
     actual = Kumi.Actual.introspect(Kumi.Test.Repo)
     diff = Kumi.Diff.diff(desired, actual)
 

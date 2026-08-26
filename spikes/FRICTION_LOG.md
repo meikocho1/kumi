@@ -242,3 +242,52 @@
 | # | 領域 | 事実 | 摩擦度 |
 |---|---|---|---|
 | F48 | 現時点（v0.2スライス1枚目）では「読み戻せる宣言的データ」以上の価値はまだ実証されていない | 今回実装した`Kumi.App`は、navigation・workflow・dashboardを構造化データとして宣言し、Info moduleで100%読み戻せる（`mix kumi.plan --app`もこのデータから repo/domain を導出する）ところまでは動いた——これ自体はBlueprint §3の「explainable magic」を満たしている。しかし現状これらのデータを**消費する側**（Admin UI生成・workflow実行エンジン・dashboard集計）はまだ存在しないため、「宣言した」以上のことはまだ何もしていない。「二層のDSL所有権」という設計判断（Ash DSLを換皮しない）自体は`resources do resource Foo end`のように実resourceモジュールをそのまま指すだけで一切重複がなく筋が良いと感じたが、価値が実証されるのは§4の優先順位2（Payload級Product DX）・3（Admin UI生成）がこのデータを実際に使い始めてから、というのが率直な現在地。 | - |
+
+---
+
+# v0.2 — Kumi.Resource shorthand / kumi.expand
+
+> 目的：Blueprint v3 §3.2「Shorthand（入門モード）」・§0 D1「Show Ash」を実装する。
+> `use Kumi.Resource` + `fields do ... end`が本物のAsh Resourceへコンパイルされ、
+> `mix kumi.expand`がその展開結果をそのまま印字することを保証する
+> （両者が同じ純粋関数`Kumi.Resource.Codegen.generate/3`から生成される、という一点鎖で担保）。
+
+## 設計の分岐点：standalone-moduleフォームを採用（inline-in-appフォームは見送り）
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F49 | Blueprintの`resource Customer do ... end`（`Kumi.App`本体にネストして書く）フォームは今回実装していない | タスク仕様が最初から明示していた通り、今回実装したのは`defmodule MyApp.Customer do use Kumi.Resource, domain: ..., repo: ..., table: ... fields do ... end end`という**standalone-moduleフォーム**のみ。Blueprintの例（`app`ブロックの中に`resource Customer do field :name, :string end`と書く形）は、`Kumi.App`（Sparkの`%Spark.Dsl.Entity{}`ベース）の枠組みの中にAsh Resourceの動的コンパイルという別種の仕組みをネストさせる必要があり、Spark entityの引数パース（`resource Customer do ... end`のブロックをKumi.App.Dslのentityとして受け取りつつ、その中身をAsh Resourceソースへ変換して**別モジュール**として動的生成する）は今回のスコープでは着手しなかった——「決めた設計を実装する、再設計しない」という制約の下、まずstandalone-moduleフォーム一枚を「Show Ash」の骨格として固めることを優先した。inline-in-appフォームが要るなら、Kumi.App.Dslのentity機構とKumi.Resource.Codegenを接続する追加レイヤーが要る、という宿題として残る。 | - |
+
+## macro実装のつまずき：`@before_compile`ネストは「見た目動くが危険」
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F50 | 最初の実装（`use Ash.Resource`を含む生成ソース全体を自前の`@before_compile`から一括注入）は、単体では正しくコンパイルされるのに、他モジュールから参照されると偽陽性エラーを出した | 最初のアプローチは「`fields do ... end`で集めたフィールド仕様を`@before_compile Kumi.Resource`まで貯めておき、そこで`use Ash.Resource, ...`を含む生成ソース全体を一括で`Code.string_to_quoted!`→spliceする」というものだった。単体で`mix run -e`から`Ash.Resource.Info.resource?/1`を呼ぶと`true`が返り、一見正しく動いているように見えた。しかし`mix compile --warnings-as-errors`をパッケージ全体に対して実行すると、このshorthand resourceを`belongs_to`で参照する別モジュールや、`resources do resource ... end`で列挙するAsh Domainが、`Exception while verifying ...: ArgumentError: ... is not a Spark DSL module`という警告付きで失敗した（`Module.ParallelChecker`が実行する`__verify_spark_dsl__/1`という、Ash自身が生成するクロスモジュール検証フック内）。原因は「`use Ash.Resource`を自前の`@before_compile`から遅延実行すると、素朴なhand-writtenリソースと違って、そのモジュールが『Ash Resourceとして認識される』タイミングが極端に遅くなり、他モジュールの検証フックとの間に競合が起きる」ことだった——最終コンパイル成果物としては正しい（`Ash.Resource.Info.resource?`は最終的に`true`）が、コンパイル**過程**の形が違うだけで、`--warnings-as-errors`環境では実害のあるエラーになる、という「動いているように見えて実は壊れやすい」実装だった。 | 高 |
+| F51 | 解決：`use Ash.Resource`は`__using__`で即時実行し、`fields do ... end`が集めたフィールド仕様だけをその場（`fields`マクロの呼び出し位置）でsplice——`@before_compile`には「fieldsブロックを書き忘れていないか」を確認するガードだけを残した | 修正版は、`domain:`だけを`__using__`から即座に`use Ash.Resource, domain: ..., data_layer: AshPostgres.DataLayer`として展開し（hand-writtenリソースと全く同じ位置・同じタイミング）、`postgres`/`actions`/`attributes`/`relationships`の4ブロックだけを`fields do ... end`マクロの展開結果としてその場に差し込む形にした。これにより「Ashリソースとして認識される瞬間」が通常のhand-writtenリソースと完全に同じタイミングになり、F50のクロスモジュール検証エラーは`mix compile --warnings-as-errors`をゼロから再実行しても再現しなくなった（Ecdo側の付随警告——`belongs_to`先を「Ectoスキーマではない」と誤検知する警告——も同時に消えたことから、根本原因が同一だったことを確認できた）。`fields do ... end`ブロックを書き忘れた場合に単に「空のAsh Resourceが黙って生成される」という劣化を防ぐため、`@before_compile Kumi.Resource`は残し、`fields`が一度も呼ばれなかった場合にのみ`CompileError`で落とす5行のガードとして再利用した。 | 中 |
+| F52 | もう一段深い罠：モジュール属性は「後続の`@attr value`という**コード**として埋め込む」のと「マクロ展開中に`Module.put_attribute/3`を直接呼ぶ」のとで、同一モジュール内の**別マクロ**からの可視性が違う | F51の修正を実装する過程で、`use Kumi.Resource, opts`の`opts`（`domain:`/`repo:`/`table:`）を`fields do ... end`マクロから読み戻す必要が生じたが、素朴に`quote do @kumi_resource_opts unquote(opts) end`という形で埋め込むと、後続の`fields/1`マクロが**展開されている最中**（`Module.get_attribute/2`を直接呼ぶ場所）ではまだ`nil`しか読めない、という現象に遭遇した——同じ内容を`@before_compile`（モジュール末尾の確定タイミング）から読めば正しく取れることは既存コードで確認済みだったため、「モジュール属性は設定した瞬間から即座に読める」という前提そのものが崩れる場面がある、というのが新しい発見だった。5行の最小再現スクリプトで検証した結果、`Module.put_attribute(caller_module, :key, value)`をマクロの**Elixirコードとして**（quoteの外で、展開時に）直接呼び出せば、同一モジュール内の後続マクロ展開時点で`Module.get_attribute`が正しく値を返すことを確認し、この形に変更して解消した——「モジュール属性への書き込みが、生成されたコードとして後で評価されるのか、マクロ展開時点で即座に副作用として実行されるのかで、可視性のタイミングが変わる」という、Elixirマクロの合成（マクロがマクロを呼ぶ）に特有の罠だった。 | 高 |
+
+## Shorthandが実際に何行節約するか（正直な集計）
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F53 | spike0_crmに追加した実例（`Spike0Crm.Crm.Note`）で、shorthandは10行、展開後のAsh Resourceは32行——約3.2倍の圧縮 | `fields do ... end`本体を含むshorthand側のコード行数（moduledocを除く、`use Kumi.Resource, ...`から`end`まで）は10行。`mix kumi.expand Spike0Crm.Crm.Note`が印字する展開後のAsh Resourceソース（`Code.format_string!`でフォーマット済み）は32行。ただしこの比較はNoteが「属性1つ＋belongs_to 1つ、policy/json_api/custom action一切なし」という最小構成だから成立する比率であり、Blueprintの`Customer`例（属性3つ＋belongs_to＋has_many）で同様の比率になるかは属性数に比例して両側とも伸びるため、「shorthandは概ねAsh定型部分（`uuid_primary_key`・`timestamps()`・`actions do defaults [...] end`・`postgres do ... end`のボイラープレート約12〜15行）をゼロにし、フィールド1個あたり1行で書ける」というのが実態に近い評価。既存のhand-writtenリソース（`Contact`、61行）との比較は`policies`/`json_api`ブロック分（約25行）が乗っているため対等な比較にならず、意図的に比較対象から外した。 | - |
+
+## Sugarが漏れる場所
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F54 | `authorizers`/`policies`/`json_api`/カスタムaction/calculation/aggregateは一切表現できない——これは意図した設計（moduledocの「escape hatch」） | `Kumi.Resource`が生成するのは常に「`uuid_primary_key`＋timestamps＋public属性＋`actions do defaults [:read, :destroy, create: :*, update: :*] end`＋`postgres`＋`relationships`」の固定形のみで、Spike0Crmの実resource（`Account`/`Contact`/`Deal`）が持つ`authorizers: [Ash.Policy.Authorizer]`・`policies do ... end`・`extensions: [AshJsonApi.Resource]`・`json_api do ... end`は一切生成できない。これはタスク仕様が最初から明示していた設計（「calculations / aggregates / custom actions / 複雑なpolicyが必要になったら、Ashを直接書く」）であり、漏れというより意図的な線引きだが、実務上は「shorthandで書けるresourceは`policies`が要らない社内ツール的なものに限られる」ことを意味する——`Spike0Crm.Crm.Note`のCRUDテストで`actor:`を渡しているのは既存resourceとの見た目の一貫性のためであり、Noteの`create`は`authorizers`がないためactorなしでも実際には通る（他resourceとの対比で明示的に確認した）。 | - |
+| F55 | `belongs_to`/`has_many`には`required:`や`destination_attribute:`などの調整オプションが存在せず、`allow_nil?`はAshのデフォルト（`true`）のまま——外部キーを必須にしたい場合はshorthandを出て手で書く必要がある | フィールドDSLの`field`には`required:`/`default:`があるが、`belongs_to`/`has_many`にはオプションを一切取らない設計にした（タスク仕様の例が`belongs_to :account, MyApp.Account`という素の形だったため）。結果として、FKを`allow_nil? false`にしたい（例えば`Kumi.Test.Resource.Deal`の`belongs_to :customer`を必須にしたいケース）場合、shorthandでは表現できず、そのフィールドだけhand-writtenへ逃げる必要がある——今回のテスト資源で唯一「FKをNOT NULLにしたい」需要があった`Deal.belongs_to :customer`は、意図的にhand-writtenリソース側（shorthandの対象外）に置くことでこの制約を回避した。 | 中 |
+| F56 | `:text`は`:string`と全く同じAshコードを生成する——Ashに「長文用の別型」が存在しないため | Ash自体に`:string`と区別される「長文（text）」専用の型は存在しない（Ecto/Ashの型システムでは両方とも`:string`型で表現され、Postgres上のカラム型（`text` vs `varchar(n)`）は`constraints`の`max_length`有無で決まる）。そのためshorthandの`:text`は単に`:string`のsugarとして実装した——`field :body, :text`と`field :body, :string`は生成されるAshコードが1バイトも変わらない。これは「型名として直感的だから残した」だけで、Ash側に対応する意味論の差は存在しない、という点はmoduledocに明記した。 | 低 |
+
+## `:email`セマンティック型は価値に見合うか
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F57 | 生成されるのは`:string`属性＋`constraints match: ~r/.../`の1行だけだが、「メールらしきものを弾く」という頻出要件をフィールド定義1行に圧縮できる点は実測でも確認できた | `field :email, :email`は`attribute :email, :string do public? true; constraints match: ~r/^[^\s@]+@[^\s@]+\.[^\s@]+$/ end`という4〜5行のAshコードに展開される。実DBに対する`Ash.create`テスト（`test/kumi/resource_semantic_types_test.exs`）で、`"not-an-email"`が`{:error, %Ash.Error.Invalid{}}`で弾かれ、`"jane@example.com"`が通ることを確認した。正規表現自体は「妥当だが網羅的ではない」単純なもの（RFC 5322準拠ではない）で、hand-writtenで書いても4〜5行程度の差にしかならないため、行数削減効果としては小さい。それでも「メールらしきものを検証する」という定型パターンを`:email`という1語で毎回思い出さずに済む、という点で、shorthandの型システムに載せる価値はある（`:select`の`one_of`も同様の理由）と評価した——ただし「セマンティック型」と呼ぶには正規表現1本のみで、Kumi.Storage（Blueprint §6）のような「upload UI/thumbnail/permissionまで繋がる」本物のpluginとは全く別の重みであることは明記しておく。 | 低 |
+
+## 検証結果
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F58 | Go/No-Go判定 | パッケージ側は103テスト全green（既存83＋新規20：`resource_test.exs`14＋`resource_semantic_types_test.exs`6——後者は`:integer`/`:decimal`/`:boolean`/`:date`/`:datetime`のCodegen型マッピングを実DBなしで直接検証する2テストを追加した分を含む）、`mix compile --warnings-as-errors`もクリーン。既存83テストのうち6件（`diff_clean_state_test.exs`・`actual_drift_test.exs`・`precision_drift_test.exs`・`probe_test.exs`）は、新domain（`Kumi.Test.ResourceDomain`）のテーブルが同一のPostgres DB（`kumi_test`、既存`Kumi.Test.Domain`と同じrepo）に追加されたことで、DB全体を走査するテストの対象domainリストに新domainを加えないと誤ってdrift扱いされる状態になったため、該当4ファイルの`Kumi.Desired.extract`/`Kumi.plan`呼び出しに`Kumi.Test.ResourceDomain`を追記する形で修正した（`Kumi.Test.Domain`自体・`Kumi.Test.Account`/`Deal`は無改変）。spike0_crm側は20テスト全green（既存18＋新規2：`note_test.exs`）、`mix kumi.expand Spike0Crm.Crm.Note`の出力を確認、`mix ash.codegen add_notes`→`mix ecto.migrate`後に`mix kumi.plan`が`No changes. Database matches application definition.`に戻ることを確認した。Info moduleのテスト（`test/kumi/app_test.exs`）もNote追加後の`resources`/`navigation`リストに合わせて更新した。 | - |

@@ -1,0 +1,117 @@
+defmodule Kumi.Resource do
+  @moduledoc """
+  Shorthand resource DSL (blueprint §3.2, §0 D1 "Show Ash"). This is
+  **sugar only**: `use Kumi.Resource` + `fields do ... end` compiles to
+  exactly the standard, hand-writable `Ash.Resource` you'd get by typing
+  it yourself — `uuid_primary_key`, public attributes, `timestamps()`,
+  `actions do defaults [:read, :destroy, create: :*, update: :*] end`, a
+  `postgres` block, and `relationships`. There is no wrapper runtime and
+  no hidden layer: `mix kumi.expand MyApp.Customer` prints the exact
+  source this macro compiles, because both read from the same pure
+  function (`Kumi.Resource.Codegen.generate/3`).
+
+      defmodule MyApp.Customer do
+        use Kumi.Resource,
+          domain: MyApp.Crm,
+          repo: MyApp.Repo,
+          table: "customers"
+
+        fields do
+          field :name, :string, required: true
+          field :email, :email
+          field :status, :select, options: [:lead, :active, :lost], default: :lead
+          belongs_to :account, MyApp.Account
+          has_many :deals, MyApp.Deal
+        end
+      end
+
+  Field types: `:string`, `:text` (sugar for `:string` — Ash has no
+  distinct long-text type), `:integer`, `:decimal`, `:boolean`, `:date`,
+  `:datetime` (→ `:utc_datetime_usec`), `:email` (`:string` + a `match:`
+  constraint), `:select` (`:atom` + `one_of:` constraint, `options:`
+  required). `required: true` → `allow_nil? false`; `default:` passes
+  through.
+
+  **Escape hatch**: need calculations, aggregates, policies, custom
+  actions, or anything else beyond the default four actions? Write the
+  Ash resource directly — start from `mix kumi.expand MyApp.Customer`'s
+  output and edit it. The shorthand and hand-written Ash never conflict;
+  they're the same target.
+
+  ## Implementation note
+
+  `use Ash.Resource` is emitted immediately (here, in `__using__`) — same
+  position as in a hand-written resource — so this module's Spark/Ash DSL
+  identity is established at the normal point in compilation. `fields do
+  ... end`, once it has the field specs, generates the full resource
+  source (`Kumi.Resource.Codegen.generate/3`), reparses it, and splices
+  everything *except* the `use Ash.Resource` line (already applied) back
+  into the module at the `fields` call site — so `postgres`/`actions`/
+  `attributes`/`relationships` land exactly where they would in
+  hand-written source, as ordinary sequential code, before Ash's own
+  `@before_compile` finalizes the DSL.
+  """
+
+  defmacro __using__(opts) do
+    caller = __CALLER__
+    resolved_opts = Enum.map(opts, fn {k, v} -> {k, resolve_alias(v, caller)} end)
+    # Stored via Module.put_attribute (not `@kumi_resource_opts unquote(...)`
+    # inside the quote below) so it's synchronously visible to `fields/1`'s
+    # own macro-expansion-time read later in this module — module attributes
+    # assigned as *generated code* aren't guaranteed visible to a sibling
+    # macro's expansion-time `Module.get_attribute/2` call until the whole
+    # module finishes (only `@before_compile` is guaranteed to see them).
+    Module.put_attribute(caller.module, :kumi_resource_opts, resolved_opts)
+    domain = Keyword.fetch!(resolved_opts, :domain)
+
+    quote do
+      import Kumi.Resource, only: [fields: 1]
+      @kumi_resource_fields_declared? false
+      @before_compile Kumi.Resource
+
+      use Ash.Resource,
+        domain: unquote(domain),
+        data_layer: AshPostgres.DataLayer
+    end
+  end
+
+  @doc "Declares this resource's fields and relationships. See the moduledoc."
+  defmacro fields(do: block) do
+    caller_module = __CALLER__.module
+    opts = Module.get_attribute(caller_module, :kumi_resource_opts)
+    specs = Kumi.Resource.FieldSpec.parse(block, __CALLER__)
+    source = Kumi.Resource.Codegen.generate(caller_module, opts, specs)
+
+    {:defmodule, _meta, [_alias, [do: body]]} = Code.string_to_quoted!(source)
+    # First form is always `use Ash.Resource, ...` — already applied by
+    # `__using__`. Assert that shape so a Codegen refactor can't silently
+    # drop a real section here instead.
+    {:__block__, block_meta, [{:use, _, _} | rest]} = body
+    sections = {:__block__, block_meta, rest}
+
+    quote do
+      @kumi_resource_fields_declared? true
+      unquote(sections)
+
+      @kumi_expand_source unquote(source)
+      @doc false
+      @spec __kumi_expand__() :: String.t()
+      def __kumi_expand__, do: @kumi_expand_source
+    end
+  end
+
+  defmacro __before_compile__(env) do
+    unless Module.get_attribute(env.module, :kumi_resource_fields_declared?, false) do
+      raise CompileError,
+        description:
+          "Kumi.Resource: #{inspect(env.module)} is missing a `fields do ... end` block",
+        file: env.file,
+        line: env.line
+    end
+
+    :ok
+  end
+
+  defp resolve_alias({:__aliases__, _, _} = ast, env), do: Macro.expand(ast, env)
+  defp resolve_alias(other, _env), do: other
+end

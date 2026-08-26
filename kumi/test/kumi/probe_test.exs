@@ -138,7 +138,7 @@ defmodule Kumi.ProbeTest do
         []
       )
 
-      plan = Kumi.plan(Kumi.Test.Repo, [Kumi.Test.Domain])
+      plan = Kumi.plan(Kumi.Test.Repo, [Kumi.Test.Domain, Kumi.Test.ResourceDomain])
 
       assert plan.findings == []
     end
@@ -150,7 +150,7 @@ defmodule Kumi.ProbeTest do
         []
       )
 
-      plan = Kumi.plan(Kumi.Test.Repo, [Kumi.Test.Domain], probe: true)
+      plan = Kumi.plan(Kumi.Test.Repo, [Kumi.Test.Domain, Kumi.Test.ResourceDomain], probe: true)
 
       assert [%Finding{count: 0, note: note}] = plan.findings
       assert note == "0 rows contain data that would be lost"
