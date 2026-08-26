@@ -46,4 +46,75 @@ defmodule Kumi do
       plan
     end
   end
+
+  @doc """
+  Builds a `%Kumi.Plan{}` for a `Kumi.App` module: derives its resources
+  (`Kumi.App.Info.resources/1`), groups them by Ash domain
+  (`Ash.Resource.Info.domain/1`), and delegates to the same pipeline as
+  `plan/3` (repo resolved via `AshPostgres.DataLayer.Info.repo/1`).
+
+  **Scoping rule** — `plan/3` diffs the whole database against *all* given
+  domains (whole-app view); `plan_app/2` diffs only the tables owned by the
+  app's declared resources (app-scoped view). A table that exists in the
+  database but isn't backing one of the app's resources — e.g. another
+  domain's tables sharing the same repo — is out of scope and is silently
+  ignored, never reported as drift (never shows up as `:drop_table`). This
+  matters because an app is expected to declare a subset of a host
+  application's resources (blueprint §3): `mix kumi.plan` stays the
+  whole-database safety net, `plan_app/2` answers "does the database match
+  *this app's* resources" only.
+
+  Accepts the same options as `plan/3` (`:snapshot_dir`, `:probe`).
+  """
+  @spec plan_app(module(), keyword()) :: Plan.t()
+  def plan_app(app, opts \\ []) do
+    resources = Kumi.App.Info.resources(app)
+    repo = resolve_repo(resources)
+    domains = resources |> Enum.map(&Ash.Resource.Info.domain/1) |> Enum.uniq()
+    scoped_tables = MapSet.new(resources, &AshPostgres.DataLayer.Info.table/1)
+
+    snapshot_dir = Keyword.get(opts, :snapshot_dir, Rename.default_snapshot_dir())
+    probe? = Keyword.get(opts, :probe, false)
+
+    actual =
+      repo
+      |> Actual.introspect()
+      |> Enum.filter(&MapSet.member?(scoped_tables, &1.name))
+
+    plan =
+      domains
+      |> Desired.extract()
+      |> Enum.filter(&MapSet.member?(scoped_tables, &1.name))
+      |> Diff.diff(actual)
+      |> Rename.detect(snapshot_dir)
+      |> Plan.build()
+
+    if probe? do
+      %{plan | findings: Kumi.Probe.run(repo, plan)}
+    else
+      plan
+    end
+  end
+
+  defp resolve_repo(resources) do
+    repos =
+      resources
+      |> Enum.filter(&(Ash.Resource.Info.data_layer(&1) == AshPostgres.DataLayer))
+      |> Enum.map(&AshPostgres.DataLayer.Info.repo/1)
+      |> Enum.uniq()
+
+    case repos do
+      [repo] ->
+        repo
+
+      [] ->
+        raise ArgumentError,
+              "Kumi.plan_app: no AshPostgres-backed resources found among #{inspect(resources)}"
+
+      many ->
+        raise ArgumentError,
+              "Kumi.plan_app: found multiple repos across the app's resources (#{inspect(many)}) — " <>
+                "v0.2 supports a single repo only"
+    end
+  end
 end

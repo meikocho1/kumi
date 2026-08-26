@@ -203,3 +203,42 @@
 | # | 領域 | 事実 | 摩擦度 |
 |---|---|---|---|
 | F39 | Go/No-Go判定 | パッケージ側73テスト全green（既存53＋新規20：精度関連8＝`pg_type_test.exs`4＋`safety_test.exs`2＋`precision_drift_test.exs`2、probe関連11＝`probe_test.exs`、findings表示1＝`format_test.exs`）。spike0_crm側16テスト全green、`mix kumi.plan`は変更後も`No changes. Database matches application definition.`のまま（CRITICAL REGRESSION GATE維持）。`spike0_crm_dev`に`ALTER TABLE crm_accounts ADD COLUMN legacy_notes text`を一時的に投入して`mix kumi.plan --probe`を実行し、`DANGEROUS`分類の`remove_column`の下に`finding: 0 rows contain data that would be lost`が正しくインデントされて表示されることを確認、検証後は`DROP COLUMN`で元に戻し、`mix kumi.plan`が再び`No changes.`に戻ることも確認した。 | - |
+
+---
+
+# v0.2 — Kumi.App DSL
+
+> 目的：Kumi v0.2マイルストーンの最初の一枚、application-level DSL `Kumi.App`
+> （Blueprint v3 §3「二層のDSL所有権」、§3.1の`app :sales do ... end`例）を実装する。
+> Ash自体が使っているSpark 2.xを直接dependencyに追加して`use Spark.Dsl`で書き、
+> Info module・verifierによる「explainable magic」（宣言した内容が必ず読み戻せる）
+> を成立させ、`Kumi.plan_app/2`でwedge（`Kumi.plan/3`）と接続する。
+
+## Sparkがタダでくれたもの
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F40 | section/entity宣言だけでパーサ・バリデータ・マクロ展開が全部ついてきた | `Kumi.App.Dsl`は`%Spark.Dsl.Section{}`5個（`app`・`resources`・`admin`・`workflows`・`dashboards`）と`%Spark.Dsl.Entity{}`4個（`resource`・`workflow`・`dashboard`・`metric`）の宣言（データ）だけで、`app do name :crm end`のようなブロック構文・`resource Foo`のような引数構文・ネストしたentity（`dashboard`の中の`metric`）が全部動いた。手書きしたのは構造体定義とverifier 5個のみで、パーサやマクロ展開のコードは1行も書いていない——AshのDomain DSL（`deps/ash/lib/ash/domain/dsl.ex`）をほぼそのまま踏襲する形で書けたのが大きい。 | 低 |
+| F41 | `top_level?: true`一つで「ラップ不要の繰り返しentity」が実現できた | Blueprintの例は`workflow :sales_pipeline do ... end`と`dashboard :overview do ... end`が`app`モジュール直下に（`workflows do ... end`のようなラップなしで）複数回書ける形を要求していた。Spark標準は「sectionは`section_name do ... end`で包む」がデフォルトだが、`%Spark.Dsl.Section{top_level?: true}`を立てるだけでその制約が外れ、section名（`:workflows`）と中のentity名（`:workflow`）を別にしておけば、Info側は`workflows/1`のまま、DSL表記は`workflow :x do ... end`のまま、両方が両立した。 | 低 |
+| F42 | Verifier / Info moduleの「型」がそのまま設計の型になった | `Spark.Dsl.Verifier`は`verify(dsl_state) :: :ok \| {:error, term} \| {:warn, ...}`という契約だけを課してくる——`Ash.Resource.Verifiers.NoReservedFieldNames`を読み写経する形で5個のverifier（resourceがAsh.Resourceか／navigationがresourcesの部分集合か／workflowのstagesが空でないか／dashboardのmetricsが空でないか／resource・workflow・dashboardの重複名）を1ファイル20〜35行で書けた。Info moduleも同様に、`Ash.Domain.Info`が`Spark.Dsl.Extension.get_entities/2`・`get_opt/3`を素で呼んでいるのを見て、`Spark.InfoGenerator`を使わず同じ書き方をした（理由はF44参照）。 | 低 |
+| F43 | `Spark.Test`の`assert_dsl_error`/`refute_dsl_errors`で「コンパイルが落ちることをテストする」が素直に書けた | verifierのエラーは`@after_verify`フック内で発生し、通常の`assert_raise`では拾えない（Spark側はデフォルトでstderr警告に変換して握りつぶす）。`Spark.Test.assert_dsl_error(%Spark.Error.DslError{path: [...]}) do defmodule Elixir.Foo do ... end end`という形でdo-block内に「壊れたDSLモジュール」をその場でdefmoduleし、収集されたエラーをパターンマッチで検証する専用ハーネスが用意されていた——8個の異常系テスト（`app_verifiers_test.exs`）を自前の`try/rescue`やプロセス間通信なしで書けた。 | 低 |
+
+## つまずいた点
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F44 | Info moduleの関数名をBlueprintの表面（`name/1`・`title/1`・`navigation/1`）に固定したかったため`Spark.InfoGenerator`を使わなかった | `Spark.InfoGenerator`はoption用の関数名をsectionパスから機械的に生成する（例：`app`section内の`name`optionは`app_name/1`、`admin`section内の`navigation`optionは`admin_navigation/1`になる）。タスク仕様が`Kumi.App.Info.name/1`・`title/1`・`navigation/1`という非プレフィックスの名前を明示していたため、InfoGeneratorの命名規則と衝突した。回避策は`Ash.Domain.Info`が実際にやっている書き方——`Spark.Dsl.Extension.get_opt/get_entities`を直接呼ぶ6行のInfo moduleを手書きする——を採用しただけで、実害はなかった（InfoGeneratorは「命名規則に従える場合」限定の時短ツールという理解に落ち着いた）。 | 低 |
+| F45 | resourceが本物の`Ash.Resource`かどうかの正しい判定関数は`Spark.implements_behaviour?/2`ではなかった | タスク仕様のヒント通り最初`Spark.implements_behaviour?(module, Ash.Resource)`を使ったところ、`use Ash.Resource`した実resource（`Kumi.Test.Account`）に対してすら`false`が返り、happy-pathのテストが誤って落ちた。`Ash.Resource`は古典的な`@behaviour`ではなく`Spark.Dsl`拡張として実装されており、正しい判定は`Ash.Resource.Info.resource?/1`（内部は`Spark.Dsl.is?/2`）だった——Ash自身のソース（`ash/lib/ash/resource/info.ex`）を読んで気づいた。verifierを直すだけで済み、テストが「間違った判定基準で誤検知していた」ことをすぐ検出できたのは収穫だった。 | 中 |
+| F46 | Entity構造体に`__spark_metadata__`フィールドが要ることを警告駆動で知った | `%Spark.Dsl.Entity{target: MyStruct}`の`MyStruct`が`__spark_metadata__`フィールドを持たないと、`mix compile --warnings-as-errors`が「Entity without __spark_metadata__ field is deprecated」で4entity分（`Resource`・`Workflow`・`Dashboard`・`Metric`）落ちた。ドキュメントを読む前にコンパイラ警告で気づけたため、`defstruct`に1フィールド足すだけで解決——Spark 2.7系での新しい規約（source annotation対応）であり、Ash本体の`deps/ash`側entityは既にこのフィールドを持っていた。 | 低 |
+
+## 汎用パイプラインの再利用で新規コードを最小化できた箇所
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F47 | `plan_app/2`のスコープ規則は「両側を同じtable名集合でフィルタする」1行で表現できた | `Kumi.plan_app/2`は`Kumi.plan/3`の中身（`Desired.extract` → `Diff.diff` → `Rename.detect` → `Plan.build`）を一切変更せず、`AshPostgres.DataLayer.Info.table/1`から作った宣言済resourceのtable名集合で、DESIRED側・ACTUAL側の両方を`Enum.filter`で絞ってから同じパイプラインに渡すだけで実装できた。「appが宣言していないresourceのtableは、DESIREDに出てこない（＝dropとして検出される）せいでdrift扱いになる」という罠を、ACTUAL側も同じ集合で絞ることで対称的に潰した——`spike0_crm`側で`Spike0Crm.App`が`Spike0Crm.Crm`のみ宣言し`Spike0Crm.Accounts`（users/tokensテーブル）を宣言しない状態で`plan_app_test.exs`を実測し、`plan.entries == []`（driftなし）を確認して裏付けた。 | 低 |
+
+## 率直な評価：app-level DSLは「実質価値」か「儀式」か
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F48 | 現時点（v0.2スライス1枚目）では「読み戻せる宣言的データ」以上の価値はまだ実証されていない | 今回実装した`Kumi.App`は、navigation・workflow・dashboardを構造化データとして宣言し、Info moduleで100%読み戻せる（`mix kumi.plan --app`もこのデータから repo/domain を導出する）ところまでは動いた——これ自体はBlueprint §3の「explainable magic」を満たしている。しかし現状これらのデータを**消費する側**（Admin UI生成・workflow実行エンジン・dashboard集計）はまだ存在しないため、「宣言した」以上のことはまだ何もしていない。「二層のDSL所有権」という設計判断（Ash DSLを換皮しない）自体は`resources do resource Foo end`のように実resourceモジュールをそのまま指すだけで一切重複がなく筋が良いと感じたが、価値が実証されるのは§4の優先順位2（Payload級Product DX）・3（Admin UI生成）がこのデータを実際に使い始めてから、というのが率直な現在地。 | - |

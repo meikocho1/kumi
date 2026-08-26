@@ -12,13 +12,19 @@ defmodule Mix.Tasks.Kumi.Plan do
       mix kumi.plan --verbose   # + per-operation provenance
       mix kumi.plan --probe     # + data-aware findings (reads live data,
                                  opt-in — see `Kumi.Probe`)
+      mix kumi.plan --app MyApp.App  # app-scoped plan (see `Kumi.plan_app/2`)
+                                 instead of the default whole-database plan
 
-  This is the convenience layer over `Kumi.plan/3`: it reads the host app's
-  `:ash_domains` config (the Spark/Ash convention —
+  Without `--app`, this is the convenience layer over `Kumi.plan/3`: it
+  reads the host app's `:ash_domains` config (the Spark/Ash convention —
   `Application.get_env(otp_app, :ash_domains)`) and resolves the repo via
   `AshPostgres.DataLayer.Info.repo/1` from the domains' resources
   themselves, rather than requiring separate repo config. All domains must
   share a single repo in this version.
+
+  With `--app`, it's the convenience layer over `Kumi.plan_app/2` instead —
+  see that function's moduledoc for the whole-database-vs-app-scoped
+  distinction.
   """
   @shortdoc "Show the diff between the Ash-desired schema and the actual Postgres schema"
 
@@ -29,13 +35,23 @@ defmodule Mix.Tasks.Kumi.Plan do
     Mix.Task.run("app.start")
 
     {opts, _rest} =
-      OptionParser.parse!(args, strict: [check: :boolean, verbose: :boolean, probe: :boolean])
+      OptionParser.parse!(args,
+        strict: [check: :boolean, verbose: :boolean, probe: :boolean, app: :string]
+      )
 
-    otp_app = Mix.Project.config()[:app]
-    domains = Application.get_env(otp_app, :ash_domains, [])
-    repo = resolve_repo(domains)
+    plan =
+      case opts[:app] do
+        nil ->
+          otp_app = Mix.Project.config()[:app]
+          domains = Application.get_env(otp_app, :ash_domains, [])
+          repo = resolve_repo(domains)
+          Kumi.plan(repo, domains, probe: opts[:probe] || false)
 
-    plan = Kumi.plan(repo, domains, probe: opts[:probe] || false)
+        app_name ->
+          app = Module.concat([app_name])
+          Kumi.plan_app(app, probe: opts[:probe] || false)
+      end
+
     ops = Enum.map(plan.entries, fn {op, _level, _reason} -> op end)
 
     if opts[:check], do: Mix.shell().info(Kumi.Plan.summary_line(plan))
