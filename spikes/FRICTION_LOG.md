@@ -379,3 +379,9 @@
 | # | 領域 | 事実 | 摩擦度 |
 |---|---|---|---|
 | F73 | フォーム・検索・削除・ボタン単位の権限表示が入り、CRUD一通り＋検索が揃ったことで「読むだけの管理画面」から「日常業務が回るCRUD画面」へは一歩進んだが、Blueprint §5が挙げる残り（Saved views・Actions（ドメイン固有の業務アクション）・Notifications・Theme・Responsive）はまだ全てゼロ | 今回の実装でAshAdmin比の差別化点にもう1つ加わったのは「ボタン単位のAsh.can?ゲーティング」——AshAdminはsuper-admin用途である以上、目の前のactorが個々のレコードに対して何ができないかを事前に隠す理由がなく、実際そうしていない（触ってみて初めて拒否される）。KumiAdminはこれを標準の振る舞いにした。一方でPayloadの「開けばもう製品」という基準に照らすと、(1) 検索は文字列属性の`contains`のみで、日付範囲・数値範囲・関連先での絞り込みはまだない、(2) フォームのwidgetはHTML標準input任せで、日付ピッカーやrich textのようなUXの作り込みは一切ない、(3) ページングは件数不明の簡易next/prevのまま（F63から変更なし）、(4) Saved views・通知・テーマは概念すら存在しない——という現在地は変わらず正直に記録しておく。「Ashの素のCRUDより明らかに製品寄り」だが「Payload/Retoolのような完成された管理画面製品」にはまだ複数マイルストーン distance がある、というのが2スライス終了時点の評価。 | - |
+
+## ブラウザ実機検証（2026-08-26）
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F74 | 実機検証 | `mix phx.server`起動後、実ブラウザ（Playwright制御のChromium）で以下を確認：(1) `/register`でユーザー登録→セッション確立、(2) `/kumi-admin`でsidebar（Mini CRM＋Accounts/Contacts/Deals/Notes）とdashboard（overview: pipeline_value / conversion_rate）描画、(3) `/kumi-admin/account`でNewボタン表示（Ash.can?ゲート通過）・空状態表示、(4) フォームからAccount作成（name+industry）→詳細ページへredirect＋flash「Account created.」、(5) 詳細ページにEdit/Deleteボタンと全属性表示、(6) `?q=acme`検索で「Acme Corporation」がヒット（大文字小文字不敏感のcontains、実Postgres上で確認）。LiveViewTestのみだった検証ギャップは解消。スクリーンショット: spikes/spike0_crm/kumi-admin-accounts-live.png | - |
