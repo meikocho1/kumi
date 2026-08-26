@@ -24,6 +24,23 @@ not replace it.
 
 ## Quick start
 
+### New project
+
+Starting from nothing? `mix kumi.new` runs `mix igniter.new` with
+Ash/Phoenix/Ash Authentication, wires in Kumi (+ kumi_admin), configures
+the DB, and installs everything — one command to a running app:
+
+```bash
+mix archive.install hex igniter_new
+mix archive.install hex phx_new
+(cd ../kumi_new && mix archive.build && mix archive.install)  # not on Hex yet, confirms [Yn]
+mix kumi.new my_crm --kumi-path .. --db-port 5434
+```
+
+(Once Kumi ships to Hex, `--kumi-path` becomes optional.)
+
+### Existing app
+
 Not on Hex yet, so `mix igniter.install kumi` doesn't resolve a package
 yet — use a path dependency plus the installer directly:
 

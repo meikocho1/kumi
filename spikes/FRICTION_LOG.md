@@ -456,3 +456,44 @@
 |---|---|---|---|
 | F90 | 十分な点：steps[]配列の各要素が独立したpass/fail/skippedと理由を持ち、`verdict`一語で「PR出していいか」の最終判断が付く、`plan.operations`はREVIEW/DANGEROUSだけに絞られていて「何を直せばいいか」が明示される——AIエージェントが「format直して」「このカラム消していいか人間に聞いて」レベルの次アクションを選ぶには足りる情報量だと判断した | 今回の実地検証（F89）で実際に`verdict: blocked`＋`plan.operations`だけを見て「`legacy_migration_notes`が原因」と機械的に特定できることを確認済み——JSON以外の情報（ログを別途grepする等）を必要としなかった。 | - |
 | F91 | 不十分な点：(1) `test`ステップの`detail`は成功時こそ簡潔（`"Result: 32 passed"`）だが、失敗時は`Result:`/`Failed:`の2行サマリのみで「どのテストが」「どのファイルの何行目で」失敗したかという構造化情報（テスト名・file:line・assertion diff）が一切ない——AIエージェントが実際に修正のためのpatchを書くには、結局`mix test`を自分でもう一度実行してログ全文を読み直す必要がある。(2) `detail`は20行で`truncate`される（ponytailコメント通り、意図的な簡略化）——`compile`の警告が21行以上のときAIは全文を失い、再実行するしかない。(3) パッチ適用「前」と「後」のdiffをこのレポート自体は一切持たない——「何が変わったからこの結果になったか」はAI側がpatchそのものを別途保持しておく前提になっており、`kumi.report`単体はステートレスなスナップショット判定しかできない。(4) REVIEW（人間の目が必要だが破壊的ではない）とDANGEROUS（データ損失）が`plan.operations`の中で`level`フィールドでしか区別されず、exit codeのレベルでは両方とも同じ「非0」に潰れる——CIがREVIEWは警告扱い・DANGEROUSは即ブロックのように差をつけたい場合、`--json`をパースしてlevelを見るしかない。総合すると「機械可読な一次判定」としては実地で機能したが、「AIがこれだけを見てpatchを直接書き直せる」水準には未達で、次のスライスがあるなら(1)のテスト失敗の構造化（`ExUnit.Formatter`のraw resultsを保持する等）が最優先だと考える。 | - |
+
+---
+
+# v0.5 — `mix kumi.new`（プロジェクト生成ワンコマンド、Blueprint v3 §28）
+
+> 目的：`mix kumi.new my_crm --db-port 5434`一発で、Kumi＋kumi_admin導入済み・authワイヤリング済み・DB設定済みの
+> 「動くPhoenix+Ashアプリ」を生成する。新パッケージ`kumi_new`（`KumiNew`名前空間、ランタイム依存ゼロ、
+> archive配布前提）として実装。既存の`kumi`/`kumi_admin`は無改変（READMEのみ例外）。
+
+## `mix igniter.new`の`--yes`は実地で完全にプロンプトを潰した——ただし通知は別
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F92 | `mix igniter.new APP --with phx.new --install ash,ash_postgres,ash_phoenix,ash_authentication,ash_authentication_phoenix --auth-strategy password --yes`を、標準入力を`/dev/null`にリダイレクトした状態（`System.cmd`の子プロセスと同条件）で2回（下見ラン・本番ラン）実地実行し、いずれもプロンプトでハング/エラー終了せず完走した——`--yes`は`igniter.new`自身の確認だけでなく、内部で合成される`ash.install`・`ash_postgres.install`・`ash_authentication.install`等すべての子タスクの確認プロンプトまで一貫して抑制していた。唯一プロンプトに似た出力は、ash installerが出す「picosat_elixirの代わりにsimple_satへの切り替え」という**情報通知**（`mix igniter.install simple_sat && mix deps.compile ash --force`という手順の案内）で、これは選択を迫るものではなく単なる`Igniter.add_notice`の出力であり、`--yes`の対象外でも実行は止まらなかった。「`--yes`が実運用で本当に無人実行を保証するか」は事前には未検証だったが、`/dev/null`縛りの2回の完走が実測の証拠になった。 | 低 |
+
+## mix.exs / config挿入：アンカー文字列1箇所限定＋失敗時は例外、で「壊れたら黙って通す」を避けた
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F93 | `KumiNew.Inject.insert_deps/3`は`"defp deps do\n    [\n"`を、`patch_port/2`は`"  hostname: \"localhost\",\n"`をアンカーに、**出現回数が厳密に1でなければ`{:error, ...}`を返す**実装にした——0件（フォーマット変更で消えた）でも2件以上（想定外の重複）でも黙って無視/誤挿入せず失敗する。下見ラン（`fixture_check`）で捕獲した実物のmix.exs/dev.exs/test.exsをテストフィクスチャとして固定し（`kumi_new/test/fixtures/`）、挿入結果が`Code.string_to_quoted/1`で構文的に有効なElixirであることまでテスト済み。**脆さの評価**：アンカーは`igniter.new`/`phx.new`が生成するテンプレートの一言一句に依存しており、将来どちらかのテンプレートがこの2行の書式を変えれば`kumi.new`は（誤挿入ではなく）明示的なエラーで止まる——「間違った推測より、正しく失敗する」というF77と同じ設計判断をここでも踏襲した。実地の本番ラン（`demo_crm`生成）でもこのアンカーは1回ずつヒットし、挿入後`mix format`をかけた上で`mix kumi.report`の`format`ステップが最終的に「all files formatted」を返したことまで確認済み。 | 中 |
+
+## 実地計測：wall-clock
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F94 | `mix igniter.new`単体（Ash/Phoenix/Auth一式のfetch+compileを含む、依存キャッシュ温まった状態）が3分14.65秒。`mix kumi.new demo_crm --db-port 5434 --kumi-path ...`のフルラン（igniter.new生成＋mix.exs/config注入＋`mix deps.get`＋`mix kumi.install --yes`＋`mix kumi_admin.install --yes`＋`mix ash.setup`）が3分54.54秒——igniter.new本体が全体の8割強を占め、Kumi側の追加ステップ（注入・2つのinstaller・DBセットアップ）は合計40秒弱だった。 | - |
+
+## 検証結果（`demo_crm`、`/private/tmp/kumi_new_check/demo_crm`、実地）
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F95 | Go/No-Go判定 | `kumi_new`パッケージは25テスト全green（Name 11・Args 6・Inject 8）、`mix format --check-formatted`／`mix compile --warnings-as-errors`ともクリーン、ランタイム依存ゼロ（`mix.exs`の`deps()`が空リスト）を維持したまま`mix archive.build`→`mix archive.install --force`でarchive化できることを実地確認。既存3スイートは無改変・全green（`kumi` 119 / `kumi_admin` 31 / `spike0_crm` 32、`kumi/README.md`のQuick startセクション追記以外はソース無変更）。実地生成（`mix kumi.new demo_crm --db-port 5434 --kumi-path /Users/akimitu/Documents/Kumi`）後、(a) 生成アプリの`mix test`が5 passed、(b) `router.ex`に`kumi_admin("/kumi-admin", ...)`のマウントを確認（grep）、(c) `Kumi.Resource`ショートハンドで`DemoCrm.Todo.Task`（`field :title, :string, required: true`）を追加し`app.ex`のresources/adminナビゲーションに登録、`MIX_ENV=dev mix ash.codegen add_tasks && mix ash.setup`でマイグレーション生成・適用が成功、(d) `mix kumi.report --skip-tests`が`format`/`compile`/`codegen`/`plan`全て✓で`Verdict: ready`・exit 0、(e) `mix phx.routes \| grep kumi-admin`で5ルート（dashboard/index/new/show/edit）を確認——という(a)〜(e)全項目を実地で通した。 | - |
+| F96 | **admin auto-mountはF78の判定ロジック込みで実地トリガーした**——`mix kumi_admin.install --yes`の出力は`"Kumi Admin: mounted at /kumi-admin in DemoCrmWeb.Router, using DemoCrmWeb.LiveUserAuth to resolve the actor."`で、TODO通知へのフォールバックではなく実マウントパスが通った。これは「`ash_authentication_phoenix`のインストーラが生成する`LiveUserAuth`は`on_mount(:current_user, ...)`節を標準で持つので、新規生成アプリでは自動検出が成立するはず」という設計時の予想が、実地（下見ラン・本番ラン双方）で崩れずに成立した、という確認結果。kumi_admin側のコードは一切変更していない。 | - |
+
+## 率直なDX評価：`create-payload-app`と比べてどうか
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F97 | `create-payload-app`は空のNext.js+Payloadプロジェクトの雛形生成（DB接続なし、認証は生成コード止まり）で概ね1分未満——対して`mix kumi.new`は**約4分**だが、その4分の中身は「空の雛形」ではなく、Postgres接続込みの認証（`ash_authentication`のpassword戦略・users/tokensテーブルとマイグレーション適用済み）・管理画面のマウントと actor 解決の自動配線・アプリ雛形（`app.ex`）が**全部実行済みで動く状態**まで一気に到達している。「1コマンドで何もない状態から`mix phx.server`」という目標そのものは実地で達成できた（F95の(a)〜(e)が生成直後のアプリに対して全部通った）が、時間の大半（3分強）が`igniter.new`本体のdeps fetch/compileであり、`kumi_new`側が短縮できる余地はほぼない（Ash/Phoenixのビルドコストそのもの）。Payloadとの比較で正直に言うと：(1) 初回のwall-clockはPayloadの4倍で「一瞬」ではない、(2) 一方で得られる状態（DB込み・認証済み・管理画面込み）はPayloadの雛形より一段深い、(3) `--kumi-path`必須というHex未公開ゆえの摩擦は、Kumiが公開されれば消える一時的なものであり恒久的なDX差ではない。総合すると「create-payload-appの再現」という当初のゴールに対しては、体験の**深さ**では並ぶ／上回るが、**速さ**の体感では届いていない、というのが実測に基づく評価。 | - |
+
+

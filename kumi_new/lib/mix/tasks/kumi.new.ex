@@ -1,0 +1,213 @@
+defmodule Mix.Tasks.Kumi.New do
+  @shortdoc "Generates a new Phoenix+Ash app with Kumi and kumi_admin installed"
+
+  @moduledoc """
+  #{@shortdoc}
+
+      mix kumi.new my_crm --kumi-path ~/Documents/Kumi --db-port 5434
+
+  One command from nothing to `mix phx.server`: runs `mix igniter.new` with
+  Ash/Phoenix/Ash Authentication, wires in Kumi + kumi_admin as path deps,
+  configures the dev/test database port, installs Kumi, mounts kumi_admin,
+  and runs `mix ash.setup`.
+
+  ## Options
+
+    * `--db-port PORT` — Postgres port for dev/test config (default: 5432).
+    * `--kumi-path DIR` — directory containing the `kumi/` and `kumi_admin/`
+      packages. **Required** while Kumi is not published to Hex; once it
+      ships to Hex this flag becomes optional and `{:kumi, "~> x.y"}` will
+      be used instead.
+    * `--no-admin` — skip kumi_admin (no admin UI mounted).
+    * `--no-setup` — skip `mix ash.setup` (DB create + migrate).
+    * `--json-api` — also install `ash_json_api`.
+
+  This task must run projectless (it generates the project) — do not run it
+  from inside an existing Mix project directory.
+  """
+
+  use Mix.Task
+
+  @impl Mix.Task
+  def run(argv) do
+    with {:ok, args} <- KumiNew.Args.parse(argv),
+         :ok <- check_target_dir(args.app_name),
+         :ok <- preflight_archives(),
+         :ok <- generate(args),
+         :ok <- inject_deps(args),
+         :ok <- patch_ports(args),
+         :ok <- format_injected(args),
+         :ok <- run_in_app(args, "deps.get", []),
+         :ok <- run_in_app(args, "kumi.install", ["--yes"]),
+         :ok <- maybe_install_admin(args) do
+      maybe_setup(args)
+      print_next_steps(args)
+    else
+      {:error, message} ->
+        Mix.shell().error("\nmix kumi.new failed: #{message}")
+        exit({:shutdown, 1})
+    end
+  end
+
+  defp check_target_dir(app_name) do
+    if File.exists?(app_name) do
+      {:error, "directory #{inspect(app_name)} already exists"}
+    else
+      :ok
+    end
+  end
+
+  defp preflight_archives do
+    {output, 0} = System.cmd("mix", ["archive"])
+
+    missing =
+      for {name, flag} <- [{"igniter_new", "igniter_new"}, {"phx_new", "phx_new"}],
+          not String.contains?(output, name),
+          do: flag
+
+    case missing do
+      [] ->
+        :ok
+
+      _ ->
+        {:error,
+         "missing required mix archive(s): #{Enum.join(missing, ", ")}. Install with:\n" <>
+           "  mix archive.install hex igniter_new\n" <>
+           "  mix archive.install hex phx_new"}
+    end
+  end
+
+  defp generate(args) do
+    Mix.shell().info("\n==> mix igniter.new #{args.app_name} ...\n")
+
+    install =
+      "ash,ash_postgres,ash_phoenix,ash_authentication,ash_authentication_phoenix"
+
+    install = if args.json_api?, do: install <> ",ash_json_api", else: install
+
+    stream_cmd("mix", [
+      "igniter.new",
+      args.app_name,
+      "--with",
+      "phx.new",
+      "--install",
+      install,
+      "--auth-strategy",
+      "password",
+      "--yes"
+    ])
+  end
+
+  defp inject_deps(args) do
+    Mix.shell().info("\n==> wiring kumi#{if args.admin?, do: " + kumi_admin"} into mix.exs\n")
+    mix_exs_path = Path.join(args.app_name, "mix.exs")
+
+    with {:ok, content} <- read(mix_exs_path),
+         {:ok, updated} <- KumiNew.Inject.insert_deps(content, args.kumi_path, args.admin?) do
+      write(mix_exs_path, updated)
+    end
+  end
+
+  defp patch_ports(%{db_port: 5432}), do: :ok
+
+  defp patch_ports(args) do
+    Mix.shell().info("\n==> setting db port #{args.db_port} in dev.exs / test.exs\n")
+
+    Enum.reduce_while(["config/dev.exs", "config/test.exs"], :ok, fn rel, :ok ->
+      path = Path.join(args.app_name, rel)
+
+      with {:ok, content} <- read(path),
+           {:ok, updated} <- KumiNew.Inject.patch_port(content, args.db_port),
+           :ok <- write(path, updated) do
+        {:cont, :ok}
+      else
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp format_injected(args) do
+    files =
+      ["mix.exs", "config/dev.exs", "config/test.exs"]
+
+    stream_cmd("mix", ["format" | files], cd: args.app_name)
+  end
+
+  defp run_in_app(args, task, extra_args) do
+    Mix.shell().info("\n==> mix #{task} #{Enum.join(extra_args, " ")}\n")
+    stream_cmd("mix", [task | extra_args], cd: args.app_name)
+  end
+
+  defp maybe_install_admin(%{admin?: false}), do: :ok
+  defp maybe_install_admin(args), do: run_in_app(args, "kumi_admin.install", ["--yes"])
+
+  defp maybe_setup(%{setup?: false}), do: :ok
+
+  defp maybe_setup(args) do
+    Mix.shell().info("\n==> mix ash.setup\n")
+
+    case stream_cmd("mix", ["ash.setup"], cd: args.app_name) do
+      :ok ->
+        :ok
+
+      {:error, message} ->
+        Mix.shell().error("""
+
+        Warning: mix ash.setup failed (#{message}).
+        The app was generated successfully — you just need a reachable Postgres.
+        Start one, then run inside #{args.app_name}:
+
+            docker run -d --name kumi_db -e POSTGRES_PASSWORD=postgres \\
+              -p #{args.db_port}:5432 postgres:17-alpine
+            mix ash.setup
+        """)
+    end
+  end
+
+  defp print_next_steps(args) do
+    steps =
+      [
+        "Add your Ash resources under `resources do ... end` in lib/#{args.app_name}/app.ex\n     (use `Kumi.Resource` shorthand, then `mix kumi.expand` / `mix ash.codegen`).",
+        "mix phx.server",
+        if(args.admin?, do: "Register a user at /register, then visit /kumi-admin"),
+        "mix kumi.plan / mix kumi.report — inspect and verify your app."
+      ]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.with_index(1)
+      |> Enum.map_join("\n", fn {step, i} -> "  #{i}. #{step}" end)
+
+    Mix.shell().info("""
+
+    ==> #{args.app_name} is ready.
+
+    Next steps:
+      cd #{args.app_name}
+    #{steps}
+    """)
+  end
+
+  defp stream_cmd(cmd, args, opts \\ []) do
+    {_output, status} =
+      System.cmd(
+        cmd,
+        args,
+        Keyword.merge([into: IO.stream(:stdio, :line), stderr_to_stdout: true], opts)
+      )
+
+    if status == 0, do: :ok, else: {:error, "`#{cmd} #{Enum.join(args, " ")}` exited #{status}"}
+  end
+
+  defp read(path) do
+    case File.read(path) do
+      {:ok, content} -> {:ok, content}
+      {:error, reason} -> {:error, "could not read #{path}: #{:file.format_error(reason)}"}
+    end
+  end
+
+  defp write(path, content) do
+    case File.write(path, content) do
+      :ok -> :ok
+      {:error, reason} -> {:error, "could not write #{path}: #{:file.format_error(reason)}"}
+    end
+  end
+end
