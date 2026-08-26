@@ -291,3 +291,51 @@
 | # | 領域 | 事実 | 摩擦度 |
 |---|---|---|---|
 | F58 | Go/No-Go判定 | パッケージ側は103テスト全green（既存83＋新規20：`resource_test.exs`14＋`resource_semantic_types_test.exs`6——後者は`:integer`/`:decimal`/`:boolean`/`:date`/`:datetime`のCodegen型マッピングを実DBなしで直接検証する2テストを追加した分を含む）、`mix compile --warnings-as-errors`もクリーン。既存83テストのうち6件（`diff_clean_state_test.exs`・`actual_drift_test.exs`・`precision_drift_test.exs`・`probe_test.exs`）は、新domain（`Kumi.Test.ResourceDomain`）のテーブルが同一のPostgres DB（`kumi_test`、既存`Kumi.Test.Domain`と同じrepo）に追加されたことで、DB全体を走査するテストの対象domainリストに新domainを加えないと誤ってdrift扱いされる状態になったため、該当4ファイルの`Kumi.Desired.extract`/`Kumi.plan`呼び出しに`Kumi.Test.ResourceDomain`を追記する形で修正した（`Kumi.Test.Domain`自体・`Kumi.Test.Account`/`Deal`は無改変）。spike0_crm側は20テスト全green（既存18＋新規2：`note_test.exs`）、`mix kumi.expand Spike0Crm.Crm.Note`の出力を確認、`mix ash.codegen add_notes`→`mix ecto.migrate`後に`mix kumi.plan`が`No changes. Database matches application definition.`に戻ることを確認した。Info moduleのテスト（`test/kumi/app_test.exs`）もNote追加後の`resources`/`navigation`リストに合わせて更新した。 | - |
+
+---
+
+# v0.3 — Kumi Admin shell slice 1
+
+> 目的：Blueprint v3 §5「Kumi Admin — Product Shell」の最初の一枚。
+> `Kumi.App`定義（`Kumi.App.Info.{name,title,resources,navigation,workflows,dashboards}`）を
+> **消費するだけ**の新規パッケージ`kumi_admin`（read-only shell：sidebar/nav・resource一覧・detail・dashboard stub）を作り、
+> Spike 0が記録したF03（AshAdminはsuper-admin専用）・F04（navigation概念なし）・F05（application定義がUIを駆動しない）
+> の3つの摩擦が、`app`定義とKumi Adminの組み合わせで実際に消えるかを確認する。
+
+## ルータマクロの実装コスト：`private:`は使えず、ash_admin流の`session:` MFAに落ち着いた
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F59 | ash_adminのroute `private:`オプションは静的（dead render）にしか効かず、`kumi_admin`が渡したいapp module／actor解決関数をLiveViewの`mount/3`に確実に届ける経路にはならなかった | `Phoenix.LiveView.Router`の`live/4`が持つ`:private`オプションは「`conn.private`に入る」ものであり（`phoenix_live_view/lib/phoenix_live_view/router.ex`のdocstringで確認）、`socket.private`に汎用データとして安定的に載る保証はない——最初の実装案（ash_adminがCSP nonce keyを`private:`で運んでいるのを見て真似た形）は、実際にはコンパイル確認までしか進めず採用を見送った。代わりに`ash_authentication_phoenix`（`ash_authentication_phoenix/lib/ash_authentication_phoenix/live_session.ex`）と`ash_admin`（`ash_admin/lib/ash_admin/router.ex`の`__session__/2`）が共通して使っている「`live_session`の`session:`オプションに`{Module, :function, args}`のMFAを渡し、関数内で`Plug.Conn.get_session/1`（Plugセッション全体）を取ってから独自キーを`Map.put`で足す」という形に合わせた。これにより`KumiAdmin.Router.__session__/4`が`kumi_admin_app`・`kumi_admin_path`・`kumi_admin_actor`の3キーを足しつつ、host側の`on_mount`フック（`ash_authentication_phoenix`の`user_token`読み取りなど）が必要とする既存のPlugセッションキーをすべて素通りさせられる——「独自データを運ぶ」と「hostの認証セッションを壊さない」が両立する形は、既存2パッケージのソースを読まずには見つけられなかった。 | 中 |
+| F60 | `scope "/", HostWeb do ... end`（moduleエイリアス付き）の中で`kumi_admin/2`を呼ぶと、Phoenixのscopeエイリアス連結が`KumiAdmin.DashboardLive`のような**フル修飾**モジュール名にまで`HostWeb.`を前置してしまい、存在しないモジュール`Spike0CrmWeb.KumiAdmin.DashboardLive`への参照で`mix compile --warnings-as-errors`が落ちた | `ash_admin`の使用例が`scope "/" do`（エイリアスなし）で`ash_admin "/admin"`を呼ぶ形になっている理由がこの実装で初めて腑に落ちた——Phoenixの`live/get/post`系マクロは、渡されたモジュール名がすでに複数セグメントの完全修飾名であってもscopeのエイリアスを無条件に連結する（`Module.concat(alias, given)`相当）。`spike0_crm`側のrouter.exでは他のブロックが`scope "/", Spike0CrmWeb do`という形を使っていたため、最初そこに倣って`kumi_admin`呼び出しも同じブロックに入れてしまい、警告で気づいた。修正は`scope "/" do`（エイリアスなし）に切り出すだけで済んだが、「サードパーティのrouterマクロは常にエイリアスなしscopeに置く」という規約を明示的に書き残す価値があると判断した。 | 低 |
+
+## Actor handoffの設計：KumiAdminは誰も認証しない、`socket.assigns`から読むだけ
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F61 | 採用した設計は「`kumi_admin/2`に渡した`on_mount:`フックが`socket.assigns`に何か（既定`:current_user`）を詰め、KumiAdminはそれを読むだけ」——`KumiAdmin.Actor.resolve/2`と`{Module, :function}`のオーバーライドで完結させた | `spike0_crm`側の配線は`on_mount: [{Spike0CrmWeb.LiveUserAuth, :current_user}]`の1行——このフックは既存コード（`live_user_auth.ex`）に元からあったもの（`AshAuthentication.Phoenix.LiveSession.assign_new_resources/2`を呼ぶだけ）で、KumiAdmin用に新規に書いた行は0。KumiAdmin側の既定値`{KumiAdmin.Actor, :from_current_user}`は`socket.assigns[:current_user]`を読むだけの1行関数。actorが`nil`のままでも例外にはならず、ポリシー保護されたリソースは`Ash.read`が`{:error, Forbidden}`を返すだけなので、それを`:forbidden`として拾って「No access or no records.」を描画する分岐に流すだけで済んだ——「認証はhostの責務、KumiAdminはactorの取り出し方だけを知っている」という線引きが、実装コード量としては非常に軽かった（`actor.ex`+`context.ex`で40行未満）。 | 低 |
+| F62 | テスト側でこの設計の裏を取るために実際のsign-in経路を通す必要があり、`AshAuthentication.Checks.AshAuthenticationInteraction`という別のpolicy bypassの存在を知らずに最初のテストが全滅した | LiveViewTestで「ログイン済みユーザーとしてshellにアクセスする」を検証するには、`Spike0Crm.Accounts.User`の`register_with_password`アクションを直接`Ash.create!`で叩いて得たJWTを`Plug.Conn.put_session("user_token", token)`でconnに積む、という素朴な方法を最初に試したが、`Ash.Error.Forbidden`（`unknown actor` / 「No policy conditions applied」）で落ちた。原因は`User`リソースの`policies do bypass AshAuthentication.Checks.AshAuthenticationInteraction do ... end end`——このcheckは`changeset.context.private.ash_authentication?`が`true`の場合のみ通過するもので、`ash_authentication`パッケージ内部のコード経由（`AshAuthentication.Strategy.action/4`など）でしか自然には立たないフラグだった。`ash_authentication/lib/ash_authentication/checks/ash_authentication_interaction.ex`のソースを読み、`Ash.Changeset.for_create(:register_with_password, attrs, context: %{private: %{ash_authentication?: true}})`と明示的にcontextを渡すことで解消——「テストで認証済みユーザーを用意する」という一見単純な作業が、hostアプリ側のセキュリティ設計（bypassの存在理由）を理解しないと通らない、という発見だった。 | 中 |
+
+## ページング：Ashの`page:`オプションは「宣言していないと使えない」——kumi coreに触れずQuery側のlimit/offsetに倒した
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F63 | タスク仕様が例示した`Ash.read(resource, page: [limit: 25, offset: N])`は、4つのCRM resourceのどれも`:read`アクションに`pagination ...`を宣言していないため、そのままでは`{:error, %Ash.Error.Invalid.PaginationRequired{}}`になる——`ash/lib/ash/actions/read/read.ex`で確認した | 素朴な回避策（Account/Contact/Dealの`:read`アクションに`pagination offset?: true`を足す）は不可能ではなかったが、4つ目の`Note`は`Kumi.Resource`（kumi core側のcodegen）が生成する固定形（`defaults [:read, :destroy, create: :*, update: :*]`）で、pagination付きの`read`を個別宣言する余地がない——kumi coreを触らない縛り（タスクのHard rules）の中でNoteだけ挙動が変わる非対称な実装は避けたかった。代わりに`Ash.Query.sort(:id) |> Ash.Query.limit(26) |> Ash.Query.offset(N)`（`page:`宣言を必要としない、任意のread actionで動くquery-level limit/offset）で26件（page_size+1）取得し、26件目が来たら「次がある」と判定して先頭25件だけ描画する、という形にした。4リソースとも無改変・kumi core無改変で「簡易next/prev」は成立したが、Ashが公式に提供する`Ash.Page.Offset`（`count`・`more?`をサーバ側で持つ構造体）は使っていない——正確な総件数は取得していない、という制約は`KumiAdmin.ResourceIndexLive`のmoduledocに明記した。 | 中 |
+
+## `Ash.Resource.Info`はgeneric table描画にどこまで効くか
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F64 | 列選択・detail描画は`Ash.Resource.Info.public_attributes/1`・`public_relationships/1`だけで、host側の設定・アノテーション追加が一切不要だった | `KumiAdmin.Columns.for_resource/1`は`public_attributes/1`を先頭6件に切るだけの1関数、detailページの`belongs_to`検出も`public_relationships/1`を`type == :belongs_to`でfilterするだけで、Account/Contact/Deal/Noteの4リソースに対してKumiAdmin側に一切の個別設定なしで動いた——host側が変更したのはrouter.exへの5行の追加のみ。唯一「推測」が入ったのは関連レコードの表示ラベル（`relationship_display/1`：`Map.has_key?(related, :name)`があれば`name`、なければid）で、これはAshのメタデータからは導出できない「名前っぽい属性はどれか」という判断——今回のCRMでは`Account`・`Contact`とも`:name`属性を持つため偶然当たったが、`:name`が存在しないリソースでは常にidにfallbackする、という素朴な取り決めであることは明記が必要。 | 低 |
+
+## 率直な評価：AshAdminとの違いはもう感じられるか
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F65 | 「navigationがapp定義から出る」「actorなし／forbiddenでもクラッシュせず正直な状態を描く」の2点はF04・F03への具体的な回答になったが、「開けばもう製品」（Blueprint §5）にはまだ遠い | AshAdminとの体感差として今回実測できたのは：(1) サイドバーのリンク・ラベルが`Spike0Crm.App`の`admin do navigation [...] end`から100%生成され、host側にnav用のLiveViewコードが1行もない（F04への回答）、(2) actorなし／policy forbiddenのケースで例外画面ではなく「No access or no records.」という文言を描画する（AshAdminはsuper-admin用途である以上、この種の「エンドユーザーが権限を持たない」状態を一級の状態として扱う理由がない——F03への回答）。一方で、slice 1は意図的にread-onlyであり、フォーム・検索・saved views・通知・権限UI・テーマ（Blueprint §5の枠組み）はゼロ、ページングも件数不明の簡易next/prevに留まる（F63）。「Ashの素のCRUD画面ではなくKumiのapp定義が実際に効いている」ことは確認できたが、「顧客が毎日働けるUI」の体感には、フォーム（slice 2予定）が入るまでは到達しないというのが率直な現在地——AshAdminとの機能面の差は今回まだ「劣化版」に近く、差別化点は今のところ「navigationとforbidden状態の描き方」の2点に限られる。 | - |
+
+## 検証結果
+
+| # | 領域 | 事実 | 摩擦度 |
+|---|---|---|---|
+| F66 | Go/No-Go判定 | 新規`kumi_admin`パッケージは13テスト全green（`slug_test.exs`3・`label_test.exs`4・`columns_test.exs`2・`format_test.exs`4）、`mix compile --warnings-as-errors`クリーン（upstream依存の警告を除く）。`kumi`コアパッケージは無改変・103テスト全green。`spike0_crm`側は25テスト全green（既存20＋新規5：`kumi_admin_live_test.exs`——sidebar/nav描画・actor付きaccount一覧・actorなしでの`No access or no records.`描画・detail画面の属性描画・dashboard画面のmetric名描画）、`mix compile --warnings-as-errors`もクリーン。`mix phx.routes \| grep kumi-admin`で`/kumi-admin`（dashboard）・`/kumi-admin/:resource`（index）・`/kumi-admin/:resource/:id`（show）の3ルートがマウント済みであることを確認した。 | - |
