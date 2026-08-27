@@ -18,4 +18,12 @@ defmodule KumiNew.NameTest do
       assert message =~ "lowercase"
     end
   end
+
+  describe "title/1" do
+    test "title-cases each underscore-separated word" do
+      assert Name.title("my_crm") == "My Crm"
+      assert Name.title("a") == "A"
+      assert Name.title("my_crm_2") == "My Crm 2"
+    end
+  end
 end

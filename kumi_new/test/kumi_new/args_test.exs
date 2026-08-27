@@ -61,4 +61,35 @@ defmodule KumiNew.ArgsTest do
     assert {:error, message} = Args.parse(["MyCrm", "--kumi-path", path])
     assert message =~ "lowercase"
   end
+
+  test "no --with/--no-modules flags -> modules_flag is :unset", %{kumi_path: path} do
+    assert {:ok, args} = Args.parse(["my_crm", "--kumi-path", path])
+    assert args.modules_flag == :unset
+    assert args.modules == []
+  end
+
+  test "--with storage -> modules_flag is {:with, [:storage]}", %{kumi_path: path} do
+    assert {:ok, args} = Args.parse(["my_crm", "--kumi-path", path, "--with", "storage"])
+    assert args.modules_flag == {:with, [:storage]}
+  end
+
+  test "--with with an unknown module errors, naming the catalog", %{kumi_path: path} do
+    assert {:error, message} =
+             Args.parse(["my_crm", "--kumi-path", path, "--with", "storage,mail"])
+
+    assert message =~ "unknown module(s): mail"
+    assert message =~ "storage — File/image uploads (kumi_storage)"
+  end
+
+  test "--no-modules -> modules_flag is :none", %{kumi_path: path} do
+    assert {:ok, args} = Args.parse(["my_crm", "--kumi-path", path, "--no-modules"])
+    assert args.modules_flag == :none
+  end
+
+  test "--with combined with --no-modules errors", %{kumi_path: path} do
+    assert {:error, message} =
+             Args.parse(["my_crm", "--kumi-path", path, "--with", "storage", "--no-modules"])
+
+    assert message =~ "cannot combine --with with --no-modules"
+  end
 end

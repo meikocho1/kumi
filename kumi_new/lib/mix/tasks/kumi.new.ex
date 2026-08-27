@@ -21,6 +21,22 @@ defmodule Mix.Tasks.Kumi.New do
     * `--no-admin` — skip kumi_admin (no admin UI mounted).
     * `--no-setup` — skip `mix ash.setup` (DB create + migrate).
     * `--json-api` — also install `ash_json_api`.
+    * `--with LIST` — comma-separated optional modules to install and wire
+      in, e.g. `--with storage`. See the catalog below.
+    * `--no-modules` — skip all optional modules explicitly (also
+      suppresses the interactive picker).
+
+  ## Optional modules
+
+    * `storage` — file/image uploads (kumi_storage). Default: off.
+
+  When neither `--with` nor `--no-modules` is given and the shell is
+  interactive, you'll be prompted to pick modules. Non-interactive runs
+  (CI, agents, piped input) default to none. `admin` is not part of this
+  picker — it's the default product shell, controlled by `--no-admin`.
+  Selected modules arrive fully wired: dep, installer, and a generated
+  migration for their resources, applied by `mix ash.setup` like everything
+  else.
 
   This task must run projectless (it generates the project) — do not run it
   from inside an existing Mix project directory.
@@ -33,13 +49,19 @@ defmodule Mix.Tasks.Kumi.New do
     with {:ok, args} <- KumiNew.Args.parse(argv),
          :ok <- check_target_dir(args.app_name),
          :ok <- preflight_archives(),
+         {:ok, args} <- resolve_modules(args),
          :ok <- generate(args),
          :ok <- inject_deps(args),
          :ok <- patch_ports(args),
+         :ok <- write_home_page(args),
+         :ok <- write_auth_overrides(args),
+         :ok <- write_page_controller_test(args),
          :ok <- format_injected(args),
          :ok <- run_in_app(args, "deps.get", []),
          :ok <- run_in_app(args, "kumi.install", ["--yes"]),
-         :ok <- maybe_install_admin(args) do
+         :ok <- maybe_install_admin(args),
+         :ok <- maybe_install_modules(args),
+         :ok <- maybe_codegen_modules(args) do
       maybe_setup(args)
       print_next_steps(args)
     else
@@ -54,6 +76,13 @@ defmodule Mix.Tasks.Kumi.New do
       {:error, "directory #{inspect(app_name)} already exists"}
     else
       :ok
+    end
+  end
+
+  defp resolve_modules(args) do
+    case KumiNew.Modules.resolve(args.modules_flag) do
+      {:ok, modules} -> {:ok, %{args | modules: modules}}
+      {:error, _} = error -> error
     end
   end
 
@@ -99,11 +128,14 @@ defmodule Mix.Tasks.Kumi.New do
   end
 
   defp inject_deps(args) do
-    Mix.shell().info("\n==> wiring kumi#{if args.admin?, do: " + kumi_admin"} into mix.exs\n")
+    extra = if args.admin?, do: " + kumi_admin", else: ""
+    modules_note = if args.modules == [], do: "", else: " + #{Enum.join(args.modules, ", ")}"
+    Mix.shell().info("\n==> wiring kumi#{extra}#{modules_note} into mix.exs\n")
     mix_exs_path = Path.join(args.app_name, "mix.exs")
 
     with {:ok, content} <- read(mix_exs_path),
-         {:ok, updated} <- KumiNew.Inject.insert_deps(content, args.kumi_path, args.admin?) do
+         {:ok, updated} <-
+           KumiNew.Inject.insert_deps(content, args.kumi_path, args.admin?, args.modules) do
       write(mix_exs_path, updated)
     end
   end
@@ -126,9 +158,53 @@ defmodule Mix.Tasks.Kumi.New do
     end)
   end
 
+  defp write_home_page(args) do
+    Mix.shell().info("\n==> branding the top page\n")
+
+    path =
+      Path.join([
+        args.app_name,
+        "lib",
+        "#{args.app_name}_web",
+        "controllers",
+        "page_html",
+        "home.html.heex"
+      ])
+
+    write(path, KumiNew.Inject.home_page(KumiNew.Name.title(args.app_name), args.admin?))
+  end
+
+  defp write_auth_overrides(args) do
+    Mix.shell().info("\n==> restyling the sign-in page\n")
+    web_module = "#{Macro.camelize(args.app_name)}Web"
+    path = Path.join([args.app_name, "lib", "#{args.app_name}_web", "auth_overrides.ex"])
+    write(path, KumiNew.Inject.auth_overrides(web_module, KumiNew.Name.title(args.app_name)))
+  end
+
+  defp write_page_controller_test(args) do
+    web_module = "#{Macro.camelize(args.app_name)}Web"
+
+    path =
+      Path.join([
+        args.app_name,
+        "test",
+        "#{args.app_name}_web",
+        "controllers",
+        "page_controller_test.exs"
+      ])
+
+    write(path, KumiNew.Inject.page_controller_test(web_module))
+  end
+
   defp format_injected(args) do
-    files =
-      ["mix.exs", "config/dev.exs", "config/test.exs"]
+    files = [
+      "mix.exs",
+      "config/dev.exs",
+      "config/test.exs",
+      "lib/#{args.app_name}_web/controllers/page_html/home.html.heex",
+      "lib/#{args.app_name}_web/auth_overrides.ex",
+      "test/#{args.app_name}_web/controllers/page_controller_test.exs"
+    ]
 
     stream_cmd("mix", ["format" | files], cd: args.app_name)
   end
@@ -140,6 +216,30 @@ defmodule Mix.Tasks.Kumi.New do
 
   defp maybe_install_admin(%{admin?: false}), do: :ok
   defp maybe_install_admin(args), do: run_in_app(args, "kumi_admin.install", ["--yes"])
+
+  defp maybe_install_modules(%{modules: []}), do: :ok
+
+  defp maybe_install_modules(args) do
+    Enum.reduce_while(args.modules, :ok, fn key, :ok ->
+      entry = KumiNew.Modules.fetch(key)
+
+      case run_in_app(args, entry.installer, ["--yes"]) do
+        :ok -> {:cont, :ok}
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  defp maybe_codegen_modules(%{modules: []}), do: :ok
+
+  defp maybe_codegen_modules(args) do
+    # Module installers (e.g. kumi_storage.install) generate resources
+    # under lib/ — not test/support — so no MIX_ENV=test workaround is
+    # needed here (that's specifically a test/support gotcha, F27). One
+    # migration for every selected module's new resource(s), generated
+    # before `mix ash.setup` so it gets applied in the same pass.
+    run_in_app(args, "ash.codegen", ["add_kumi_modules"])
+  end
 
   defp maybe_setup(%{setup?: false}), do: :ok
 

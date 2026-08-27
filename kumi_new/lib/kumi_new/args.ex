@@ -9,7 +9,11 @@ defmodule KumiNew.Args do
             kumi_path: nil,
             admin?: true,
             setup?: true,
-            json_api?: false
+            json_api?: false,
+            modules_flag: :unset,
+            modules: []
+
+  @type modules_flag :: {:with, [atom()]} | :none | :unset
 
   @type t :: %__MODULE__{
           app_name: String.t(),
@@ -17,7 +21,9 @@ defmodule KumiNew.Args do
           kumi_path: String.t(),
           admin?: boolean(),
           setup?: boolean(),
-          json_api?: boolean()
+          json_api?: boolean(),
+          modules_flag: modules_flag(),
+          modules: [atom()]
         }
 
   @switches [
@@ -25,7 +31,9 @@ defmodule KumiNew.Args do
     kumi_path: :string,
     admin: :boolean,
     setup: :boolean,
-    json_api: :boolean
+    json_api: :boolean,
+    with: :string,
+    modules: :boolean
   ]
 
   @spec parse([String.t()]) :: {:ok, t()} | {:error, String.t()}
@@ -35,7 +43,8 @@ defmodule KumiNew.Args do
     with :ok <- check_invalid(invalid),
          {:ok, app_name} <- fetch_app_name(positional),
          :ok <- KumiNew.Name.validate(app_name),
-         {:ok, kumi_path} <- fetch_kumi_path(opts) do
+         {:ok, kumi_path} <- fetch_kumi_path(opts),
+         {:ok, modules_flag} <- fetch_modules_flag(opts) do
       {:ok,
        %__MODULE__{
          app_name: app_name,
@@ -43,7 +52,8 @@ defmodule KumiNew.Args do
          kumi_path: kumi_path,
          admin?: Keyword.get(opts, :admin, true),
          setup?: Keyword.get(opts, :setup, true),
-         json_api?: Keyword.get(opts, :json_api, false)
+         json_api?: Keyword.get(opts, :json_api, false),
+         modules_flag: modules_flag
        }}
     end
   end
@@ -70,6 +80,28 @@ defmodule KumiNew.Args do
 
       path ->
         validate_kumi_path(Path.expand(path))
+    end
+  end
+
+  defp fetch_modules_flag(opts) do
+    with_str = Keyword.get(opts, :with)
+    modules_bool = Keyword.get(opts, :modules)
+
+    cond do
+      with_str != nil and modules_bool == false ->
+        {:error, "cannot combine --with with --no-modules"}
+
+      with_str != nil ->
+        case KumiNew.Modules.parse_selection(with_str) do
+          {:ok, list} -> {:ok, {:with, list}}
+          {:error, _} = error -> error
+        end
+
+      modules_bool == false ->
+        {:ok, :none}
+
+      true ->
+        {:ok, :unset}
     end
   end
 
