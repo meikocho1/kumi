@@ -118,13 +118,14 @@ app :sales do
   resource Contact
   resource Opportunity
 
-  workflow :sales_pipeline do
-    stages [:lead, :qualified, :proposal, :won, :lost]
-  end
+  workflow :sales_pipeline,
+    resource: Opportunity,
+    field: :stage,
+    stages: [:lead, :qualified, :proposal, :won, :lost]
 
   dashboard :overview do
-    metric :pipeline_value
-    metric :conversion_rate
+    metric :deal_count, resource: Opportunity
+    metric :pipeline_value, resource: Opportunity, kind: :sum, field: :amount
   end
 end
 ```
@@ -237,6 +238,20 @@ field :avatar, :image
 Template / Campaign / Contact / Delivery / Event
 Admin UI / Jobs / Analytics までApplication Modelに統合
 ```
+
+## Kumi.Storage v1 設計（2026-08-27 決定 — guide採取のF103糊コード原料から着手）
+
+ユーザー否認可能な決定として記録。実装前提7点：
+
+1. **トポロジ（D1準拠・循環回避）**：`kumi_storage`パッケージ + `mix kumi_storage.install`が**素のAshソースのAttachment resource（`<App>.Core.Attachment`）をホストアプリ内に生成**（ユーザー所有・完全可視）。`field :avatar, :image, to: MyApp.Core.Attachment`は既存のbelongs_to展開に乗る（shorthandは既にrelationship対応済み）——kumi coreはkumi_storageを知らず、`kumi.expand`は素のbelongs_toを印字。expand==compiled不変条件はコア単体で成立。
+2. **kumi_storage未導入ホスト**：`:image`で`to:`のモジュールが不在→コンパイル時エラーで`mix kumi_storage.install`を案内。`to:`省略→オプションを説明するエラー。存在しないモジュールへ展開して実行時死させない。
+3. **admin結合**：生成Attachment resourceに構造マーカー（`def __kumi_attachment__, do: true`）を含め、kumi_adminは`function_exported?`で判定（kumi_storageへの依存なし・実行時sniffingなし）。upload widget実装はrun 2。
+4. **zero-diffゲート**：installerがAttachmentをホストdomainに登録→planのdesired側に入りcodegenでテーブル生成→クリーン状態zero-diff維持（ホスト生成方式の副産物として無償）。
+5. **cleanup**：v1はattachmentレコードdestroy時のファイル削除のみ（生成resourceの可視なafter_action）。孤児ファイル掃除は明示的に後送り。
+6. **検証は信頼境界でv1必須**：サイズ上限＋content-type allowlist（省略不可——lazy化禁止リスト該当）。
+7. **backend境界**：`KumiStorage.Backend` behaviour + 実装は`Local`（FS）のみ。S3はコミット済みfollow-up（投機的抽象ではなく約束された2実装目）。配信は`KumiStorage.Plug`（installerがrouterにforward挿入、deps=ash+plugのみ、phoenixなし）。
+8. **upload action契約（run 2）**：storage呼び出しは全て生成Attachment resource内に置く——`create :upload` action（arguments: `source`（tagged tuple `{:path, p}`）/ `filename` / `content_type` / `byte_size`、可視のchangeがValidation→Backend.storeを実行して属性を設定）。kumi_adminはこの規約actionとmarkerだけを知り、kumi_storageに依存しない（admin depsはkumi+phoenix+LV+ash_phoenixのまま——パッケージ不変条件）。検証の境界はホストresource側。
+9. **URL契約**：生成resourceに`__kumi_attachment_url__/1`（installerが実際に挿入したforwardパスと一致するホスト所有関数）。adminは`function_exported?`経由で呼ぶ。replace時の旧attachmentは孤児として残す（5.の後送りと整合、ドキュメントに明記）。
 
 ## 生態の順序
 
@@ -405,6 +420,8 @@ D2で受容済み。Kumi IR / Plan Model / Plugin Model / UI DefinitionをAsh内
 - [ ] Kumi Adminの技術基盤：LiveViewコンポーネント設計、theme機構
 - [ ] Workflow実行エンジン：AshStateMachine利用か独自か（Spike 0で評価）
 - [ ] License / Hex名 / GitHub org / 商標（v1から未決のまま）
+- [x] 判断済み（2026-08-27）：`mix kumi.apply --safe-only` は作る。ただしPayload式pushではなく「SAFEなdrift修復」に限定 — codegenはcode→snapshot前進を担い、kumi.applyはDBがsnapshotに置いていかれた側（codegenが原理的に見えない方向）のみ。SAFE∧allowlist∧SQL完全描画可のみ実行、REVIEW/DANGEROUSはフラグでも不可、dev限定、planは読み取り専用のまま
+- [ ] OSS公開の範囲（方針合意済み・2026-08-27）：公開は`kumi/`・`kumi_admin/`・`kumi_new/`の3パッケージのみ。blueprint / FRICTION_LOG / CLAUDE.md等の内部文書は日本語のまま非公開。friction logの教訓は英語の"gotchas"ガイドに蒸留して公開する。コミット・PRの文言は今後英語で統一（既存コミットは全て英語）
 
 ---
 

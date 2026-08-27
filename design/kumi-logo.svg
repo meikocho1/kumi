@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Kumi">
+  <!-- Kumi mark: kumiko-lattice diamond — a 3x3 assembly rotated 45°,
+       center piece left open. Eight pieces joined without nails. -->
+  <g fill="#4338CA" transform="rotate(45 50 50)">
+    <rect x="16" y="16" width="20" height="20" rx="2"/>
+    <rect x="40" y="16" width="20" height="20" rx="2"/>
+    <rect x="64" y="16" width="20" height="20" rx="2"/>
+    <rect x="16" y="40" width="20" height="20" rx="2"/>
+    <rect x="64" y="40" width="20" height="20" rx="2"/>
+    <rect x="16" y="64" width="20" height="20" rx="2"/>
+    <rect x="40" y="64" width="20" height="20" rx="2"/>
+    <rect x="64" y="64" width="20" height="20" rx="2"/>
+  </g>
+</svg>

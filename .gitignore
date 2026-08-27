@@ -1,4 +1,5 @@
 .DS_Store
 
-# spike app is its own git repo
+# spike apps are their own git repos
 spikes/spike0_crm/
+spikes/chat_ops/
