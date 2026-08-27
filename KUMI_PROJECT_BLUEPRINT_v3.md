@@ -313,6 +313,22 @@ v0.4     AI patch pipeline（app-level）
 v0.5+    Plugin抽出（guideの糊コードから）/ Preview / Deploy
 ```
 
+## API・フロント・examplesの方針（2026-08-27決定）
+
+PayloadはheadlessでAPIレスポンスが主戦場だが、**Kumiは統合型を主、headlessを従とする**
+——Phoenix/LiveViewの土俵ではフロントを同じアプリに置くのが最短かつ最も安全。
+ゆえに「APIレイヤをKumiが作る」ことはしない（§6の薄いラッパー禁止に該当。
+AshJsonApi / AshGraphqlが既に完成品で、spike0_crmで実証済み）。Kumiの仕事は**道筋を示すguide**：
+
+- `kumi/guides/api.md` — 必要になった時にAPIを足す手順（AshJsonApi拡張 + router、
+  shorthandは非対応なので素のAshに落ちる＝D1の逃生ハッチの正規用法。
+  JSON:APIの`include`が「何階層まで返すか」の答え＝Payloadのdepth相当）。
+- `kumi/guides/frontend.md` — 公開フロントを同じアプリに載せる手順（公開LiveView、
+  未ログイン訪問者向けpolicy、adminとの共存ルーティング。chat_opsのwidgetが実例）。
+- **examples** — Payloadの`examples/`に相当するものは必要。ただし保守コストを増やさない形：
+  guideの手順で生成される実物をexampleとして扱う（guideとexampleが乖離しない）。
+  独立した見本アプリ群をリポジトリに抱えるのは、guideが揃ってから判断する。
+
 ---
 
 # 10. Spike Plan（Day 0–3、v2から拡張）

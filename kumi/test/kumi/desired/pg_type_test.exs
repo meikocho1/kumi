@@ -60,4 +60,20 @@ defmodule Kumi.Desired.PgTypeTest do
       assert PgType.precision_from_ash(Ash.Type.String, trim?: true, allow_empty?: false) == nil
     end
   end
+
+  describe "parameterized and unmapped types never crash the plan" do
+    # pgvector columns (an AI app's embedding storage) hit this: AshPostgres
+    # returns {:vector, dimensions}, and Postgres reports udt_name "vector".
+    test "Ash.Type.Vector with dimensions -> vector, matching udt_name" do
+      assert PgType.from_ash(Ash.Type.Vector, dimensions: 1536) == "vector"
+      assert PgType.from_ash(Ash.Type.Vector, []) == "vector"
+    end
+
+    test "an unrecognized shape yields a non-matching name instead of raising" do
+      # Fails closed: whatever comes back cannot equal a real udt_name, so the
+      # column surfaces as a change and Safety classifies the unknown pair
+      # DANGEROUS — a plan that still runs beats one that crashes.
+      assert is_binary(PgType.from_ash(Ash.Type.Vector, dimensions: {:weird, %{}}))
+    end
+  end
 end

@@ -11,6 +11,15 @@ defmodule KumiAdmin.Format do
   @doc "Renders a single attribute value for display, keyed by attribute name."
   @spec cell(atom(), term()) :: String.t()
   def cell(:id, value) when is_binary(value), do: truncate_id(value)
+
+  # Foreign keys are ids too: rendering a full UUID in a `*_id` cell pushes
+  # every other column out of the way and wraps in narrow tables.
+  def cell(key, value) when is_atom(key) and is_binary(value) do
+    if String.ends_with?(Atom.to_string(key), "_id"),
+      do: truncate_id(value),
+      else: to_string(value)
+  end
+
   def cell(_key, %DateTime{} = value), do: short_datetime(value)
   def cell(_key, %NaiveDateTime{} = value), do: short_datetime(value)
   def cell(_key, nil), do: "—"

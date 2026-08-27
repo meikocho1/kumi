@@ -158,6 +158,17 @@ defmodule KumiAdmin.Components.Shell do
     .kumi-admin-flash { padding: 0.7rem 1rem; border-radius: var(--kumi-radius); margin-bottom: 1rem; font-size: 0.9rem; }
     .kumi-admin-flash-info { background: #ecfdf3; color: #05603a; }
     .kumi-admin-flash-error { background: #fef3f2; color: var(--kumi-danger); }
+    .kumi-admin-panel { background: var(--kumi-surface); border: 1px solid var(--kumi-border); border-radius: var(--kumi-radius); margin-bottom: 1.25rem; }
+    .kumi-admin-panel-header { padding: 0.85rem 1.25rem; border-bottom: 1px solid var(--kumi-border); }
+    .kumi-admin-panel-body { padding: 1.25rem; }
+    .kumi-admin-section-title { margin: 0; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--kumi-text-muted); }
+    .kumi-admin-attribute-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 1.5rem; }
+    @media (max-width: 800px) { .kumi-admin-attribute-grid { grid-template-columns: 1fr; } }
+    .kumi-admin-record-header { align-items: flex-start; margin-bottom: 1.5rem; }
+    .kumi-admin-actions-heading { display: flex; flex-direction: column; gap: 0.15rem; }
+    .kumi-admin-actions-buttons { display: flex; gap: 0.75rem; align-items: center; flex-shrink: 0; }
+    .kumi-admin-subtitle { margin: 0; color: var(--kumi-text-muted); font-size: 0.85rem; }
+    .kumi-admin-badge { display: inline-block; padding: 0.15rem 0.55rem; border-radius: 999px; background: #eef2ff; color: var(--kumi-accent); font-size: 0.75rem; font-weight: 500; text-transform: capitalize; }
     """
   end
 end

@@ -21,4 +21,11 @@ defmodule KumiAdmin.FormatTest do
     assert Format.cell(:stage, :lead) == "lead"
     assert Format.cell(:name, "Acme") == "Acme"
   end
+
+  test "cell/2 truncates foreign keys, not other strings" do
+    uuid = "d807c77b-e7a2-4ef1-85c6-a267c46805b9"
+
+    assert Format.cell(:account_id, uuid) == "d807c77b…"
+    assert Format.cell(:name, uuid) == uuid
+  end
 end

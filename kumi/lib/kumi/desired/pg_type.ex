@@ -62,4 +62,19 @@ defmodule Kumi.Desired.PgType do
   defp to_pg_name(:bigint), do: "int8"
   defp to_pg_name(:integer), do: "int4"
   defp to_pg_name(atom) when is_atom(atom), do: Atom.to_string(atom)
+
+  # Parameterized types we don't map explicitly: AshPostgres returns them as
+  # `{name, arg, ...}` (e.g. `{:vector, 1536}` for `Ash.Type.Vector` with
+  # `dimensions:`). Postgres reports only the bare type name in
+  # `information_schema.columns.udt_name` ("vector"), so the first element is
+  # the right desired-side value. Without this clause an unmapped shape raised
+  # a FunctionClauseError, which broke `mix kumi.plan` outright instead of
+  # failing closed — pgvector columns made the whole plan unusable.
+  defp to_pg_name(tuple) when is_tuple(tuple) and tuple_size(tuple) > 0,
+    do: tuple |> elem(0) |> to_pg_name()
+
+  # Last resort: never crash the plan on an unrecognized type. An inspected
+  # value will not match any real `udt_name`, so it surfaces as a change and
+  # `Kumi.Plan.Safety` classifies the unknown pair DANGEROUS — fail closed.
+  defp to_pg_name(other), do: inspect(other)
 end

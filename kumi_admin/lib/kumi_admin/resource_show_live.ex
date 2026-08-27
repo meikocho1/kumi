@@ -18,6 +18,8 @@ defmodule KumiAdmin.ResourceShowLive do
 
   use Phoenix.LiveView
 
+  alias KumiAdmin.Components.Atoms
+  alias KumiAdmin.Components.Organisms
   alias KumiAdmin.Components.Shell
 
   def mount(params, session, socket) do
@@ -165,7 +167,10 @@ defmodule KumiAdmin.ResourceShowLive do
     base = %{
       relationship: relationship,
       destination: destination,
-      columns: KumiAdmin.Columns.for_resource(destination),
+      # The child's FK back to this record is the same value on every row —
+      # it carries no information on the parent's own page.
+      columns:
+        KumiAdmin.Columns.for_resource(destination) -- [relationship.destination_attribute],
       linkable?: destination in admin_resources
     }
 
@@ -198,6 +203,24 @@ defmodule KumiAdmin.ResourceShowLive do
     end
   end
 
+  # "Account · a1b2c3d4…" — the muted second line under the record label on
+  # the header. Raw last module segment, not `Phoenix.Naming.humanize/1`:
+  # that function only splits on underscores, so it would mangle a
+  # multi-word resource name like `StageCount` into "Stagecount".
+  defp resource_subtitle(resource, record) do
+    name = resource |> Module.split() |> List.last()
+    "#{name} · #{KumiAdmin.Format.truncate_id(record.id)}"
+  end
+
+  defp relation_items(relationships, record) do
+    Enum.map(relationships, fn relationship ->
+      %{
+        label: Phoenix.Naming.humanize(relationship.name),
+        display: relationship_display(Map.get(record, relationship.name), relationship)
+      }
+    end)
+  end
+
   def render(assigns) do
     ~H"""
     <Shell.shell
@@ -208,92 +231,48 @@ defmodule KumiAdmin.ResourceShowLive do
       sign_out_path={@sign_out_path}
       flash={@flash}
     >
-      <a
+      <Atoms.back_link
         :if={@resource}
         href={"#{@mount_path}/#{KumiAdmin.Slug.for_resource(@resource)}"}
-        class="kumi-admin-back-link"
       >
-        &larr; Back to {KumiAdmin.Label.plural(@resource)}
-      </a>
+        Back to {KumiAdmin.Label.plural(@resource)}
+      </Atoms.back_link>
 
-      <div :if={is_nil(@error)} class="kumi-admin-actions">
-        <a
-          :if={@can_update?}
-          href={"#{@mount_path}/#{KumiAdmin.Slug.for_resource(@resource)}/#{@record.id}/edit"}
-          class="kumi-admin-button"
-        >
-          Edit
-        </a>
-        <button
-          :if={@can_destroy?}
-          phx-click="delete"
-          data-confirm="Are you sure?"
-          class="kumi-admin-button kumi-admin-button-danger"
-        >
-          Delete
-        </button>
-      </div>
-
-      <p :if={@error == :not_found} class="kumi-admin-empty">
-        Unknown resource.
-      </p>
-
-      <p :if={@error == :forbidden} class="kumi-admin-empty">
-        No access or no record.
-      </p>
+      <Atoms.empty :if={@error == :not_found} text="Unknown resource." />
+      <Atoms.empty :if={@error == :forbidden} text="No access or no record." />
 
       <div :if={is_nil(@error)}>
-        <div :for={attribute <- @attributes} class="kumi-admin-field">
-          <span class="kumi-admin-field-label">{Phoenix.Naming.humanize(attribute.name)}</span>
-          <span class="kumi-admin-field-value">
-            {KumiAdmin.Format.cell(attribute.name, Map.get(@record, attribute.name))}
-          </span>
-        </div>
-        <div :for={relationship <- @relationships} class="kumi-admin-field">
-          <span class="kumi-admin-field-label">{Phoenix.Naming.humanize(relationship.name)}</span>
-          <span class="kumi-admin-field-value">
-            <% display = relationship_display(Map.get(@record, relationship.name), relationship) %>
-            <a :if={match?({:link, _, _}, display)} href={elem(display, 1)}>{elem(display, 2)}</a>
-            <span :if={match?({:text, _}, display)}>{elem(display, 1)}</span>
-          </span>
-        </div>
+        <Organisms.record_header
+          label={KumiAdmin.Format.record_label(@record)}
+          subtitle={resource_subtitle(@resource, @record)}
+        >
+          <:actions>
+            <Atoms.button
+              :if={@can_update?}
+              href={"#{@mount_path}/#{KumiAdmin.Slug.for_resource(@resource)}/#{@record.id}/edit"}
+            >
+              Edit
+            </Atoms.button>
+            <Atoms.button
+              :if={@can_destroy?}
+              variant="danger"
+              phx-click="delete"
+              data-confirm="Are you sure?"
+            >
+              Delete
+            </Atoms.button>
+          </:actions>
+        </Organisms.record_header>
 
-        <div :for={section <- @has_many_sections} class="kumi-admin-field">
-          <h2 class="kumi-admin-title">{KumiAdmin.Label.plural(section.destination)}</h2>
+        <Organisms.attribute_panel attributes={@attributes} record={@record} />
 
-          <p :if={section.error == :forbidden} class="kumi-admin-empty">No access.</p>
+        <Organisms.relation_panel items={relation_items(@relationships, @record)} />
 
-          <p :if={section.error == nil and section.rows == []} class="kumi-admin-empty">
-            No records yet.
-          </p>
-
-          <table :if={section.error == nil and section.rows != []} class="kumi-admin-table">
-            <thead>
-              <tr>
-                <th :for={column <- section.columns}>{Phoenix.Naming.humanize(column)}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr :for={child <- section.rows}>
-                <td :for={column <- section.columns}>
-                  <a
-                    :if={column == :id and section.linkable?}
-                    href={"#{@mount_path}/#{KumiAdmin.Slug.for_resource(section.destination)}/#{child.id}"}
-                  >
-                    {KumiAdmin.Format.cell(column, Map.get(child, column))}
-                  </a>
-                  <span :if={column != :id or !section.linkable?}>
-                    {KumiAdmin.Format.cell(column, Map.get(child, column))}
-                  </span>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-
-          <p :if={section.error == nil and section.has_more?} class="kumi-admin-empty">
-            …and more.
-          </p>
-        </div>
+        <Organisms.child_section
+          :for={section <- @has_many_sections}
+          section={section}
+          mount_path={@mount_path}
+        />
       </div>
     </Shell.shell>
     """

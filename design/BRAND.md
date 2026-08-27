@@ -4,8 +4,12 @@
 
 `design/kumi-logo.svg` — the kumiko-lattice diamond: a 3×3 assembly rotated 45°,
 center piece left open. Eight pieces joined without nails — Ash resources
-assembled into a product. Works from 16px (favicon) to any size. Concept sheet
-that led to it: `design/kumi-logo-concepts.png` (adopted: top-left).
+assembled into a product. Flat single-colour Kumi Indigo, legible from 16px
+(favicon) upward. Concept sheet it came from: `design/kumi-logo-concepts.png`
+(adopted: top-left).
+
+A kanji-based mark (組 in a seal frame) was drawn and rejected — the character
+rebuilt from uniform bars did not read as clean at the sizes that matter.
 
 ## Color
 
