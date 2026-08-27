@@ -24,11 +24,16 @@ defmodule Kumi.Test.App do
     navigation([Kumi.Test.Account])
   end
 
-  workflow :onboarding do
-    stages([:invited, :active])
-  end
+  # Fixture-pragmatic binding: this app declares only Account (see moduledoc),
+  # and :industry has no `one_of` constraint, so this only exercises
+  # existence checks (resource declared, field public) — not stage validity.
+  workflow(:onboarding,
+    resource: Kumi.Test.Account,
+    field: :industry,
+    stages: [:invited, :active]
+  )
 
   dashboard :overview do
-    metric(:account_count)
+    metric(:account_count, resource: Kumi.Test.Account)
   end
 end

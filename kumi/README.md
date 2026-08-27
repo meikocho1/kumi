@@ -37,6 +37,10 @@ mix archive.install hex phx_new
 mix kumi.new my_crm --kumi-path .. --db-port 5434
 ```
 
+Want optional modules (e.g. file/image uploads) wired in too? Add `--with
+storage`, or run interactively (no `--with`/`--no-modules`, TTY shell) and
+pick from the printed catalog.
+
 (Once Kumi ships to Hex, `--kumi-path` becomes optional.)
 
 ### Existing app
@@ -51,19 +55,22 @@ yet — use a path dependency plus the installer directly:
 
 ```bash
 mix deps.get
-mix kumi.install   # generates lib/<app>/app.ex — a `use Kumi.App` skeleton
+mix kumi.install   # generates lib/<app>/app.ex — a `use Kumi.App` skeleton —
+                   # plus an <App>.Core domain, registered in :ash_domains
 ```
 
 (Once published to Hex, `mix igniter.install kumi` will do both steps —
 add the dependency and run the installer — in one command, the same way
 `mix igniter.install ash` works today.)
 
-Add your Ash resources to the generated `resources do ... end` block, then:
+Add your Ash resources under `<App>.Core`, then list them in the generated
+`resources do ... end` block, then:
 
 ```bash
 mix kumi.plan            # human-readable plan
 mix kumi.plan --verbose  # + provenance for each judgment
 mix kumi.plan --check    # CI: exit 1 if anything needs REVIEW or is DANGEROUS
+mix kumi.apply           # dev-only: executes the SAFE drift-repair subset of the plan
 ```
 
 Want the admin UI too? Add `{:kumi_admin, path: "../kumi_admin"}` and run
@@ -114,14 +121,16 @@ Hint     = AshPostgres snapshots (history; rename disambiguation only)
 
 ## Known limitations
 
-- `timestamp(0)` vs `timestamp(6)` precision changes are not detected
-  (comparison is by `udt_name` only).
 - Snapshot parsing depends on AshPostgres's internal, undocumented snapshot
   JSON format — an AshPostgres upgrade may break rename hints (covered by
   tests against real snapshot files, so breakage is caught loudly).
 - Data-aware checks ("this NOT NULL change would fail on 143 existing NULLs")
   are planned but not implemented; classification is catalog-based only.
 - Verified against a single host application so far.
+
+See [guides/ash-gotchas.md](guides/ash-gotchas.md) for Ash/Spark/AshPostgres/Igniter gotchas found while building Kumi.
+
+See [guides/mini-crm.md](guides/mini-crm.md) for a from-scratch walkthrough building a CRM with Kumi and official Ash libraries.
 
 ## Development
 

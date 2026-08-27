@@ -24,13 +24,14 @@ defmodule Kumi.App do
           navigation [MyApp.Account, MyApp.Contact, MyApp.Deal]
         end
 
-        workflow :sales_pipeline do
-          stages [:lead, :qualified, :proposal, :won, :lost]
-        end
+        workflow :sales_pipeline,
+          resource: MyApp.Deal,
+          field: :stage,
+          stages: [:lead, :qualified, :proposal, :won, :lost]
 
         dashboard :overview do
-          metric :pipeline_value
-          metric :conversion_rate
+          metric :deal_count, resource: MyApp.Deal
+          metric :pipeline_value, resource: MyApp.Deal, kind: :sum, field: :amount
         end
       end
 

@@ -14,15 +14,29 @@ defmodule Kumi.App.Dsl do
   end
 
   defmodule Metric do
-    @moduledoc "A single `metric :name` entry inside a `dashboard do ... end` block."
-    defstruct [:name, :__spark_metadata__]
-    @type t :: %__MODULE__{name: atom(), __spark_metadata__: term()}
+    @moduledoc "A single `metric :name, resource: ...` entry inside a `dashboard do ... end` block."
+    defstruct [:name, :resource, :field, :__spark_metadata__, kind: :count]
+
+    @type t :: %__MODULE__{
+            name: atom(),
+            resource: module(),
+            kind: :count | :sum,
+            field: atom() | nil,
+            __spark_metadata__: term()
+          }
   end
 
   defmodule Workflow do
     @moduledoc "A top-level `workflow :name do ... end` entry."
-    defstruct [:name, :__spark_metadata__, stages: []]
-    @type t :: %__MODULE__{name: atom(), stages: [atom()], __spark_metadata__: term()}
+    defstruct [:name, :resource, :field, :__spark_metadata__, stages: []]
+
+    @type t :: %__MODULE__{
+            name: atom(),
+            resource: module(),
+            field: atom(),
+            stages: [atom()],
+            __spark_metadata__: term()
+          }
   end
 
   defmodule Dashboard do
@@ -75,12 +89,17 @@ defmodule Kumi.App.Dsl do
   @admin %Spark.Dsl.Section{
     name: :admin,
     describe: "Admin UI configuration.",
-    examples: ["admin do\n  navigation [MyApp.Account]\nend"],
+    examples: ["admin do\n  navigation [MyApp.Account]\n  related_limit 10\nend"],
     schema: [
       navigation: [
         type: {:list, :module},
         default: [],
         doc: "Resources shown in the admin nav, in order. Must be a subset of `resources`."
+      ],
+      related_limit: [
+        type: :pos_integer,
+        default: 10,
+        doc: "Max child rows shown per has_many section on a detail page."
       ]
     ]
   }
@@ -88,20 +107,40 @@ defmodule Kumi.App.Dsl do
   @metric %Spark.Dsl.Entity{
     name: :metric,
     describe: "A single metric shown on a dashboard.",
-    examples: ["metric :pipeline_value"],
+    examples: ["metric :pipeline_value, resource: MyApp.Deal, kind: :sum, field: :amount"],
     target: Metric,
     args: [:name],
-    schema: [name: [type: :atom, required: true]]
+    schema: [
+      name: [type: :atom, required: true],
+      resource: [type: :module, required: true, doc: "Ash resource this metric reads."],
+      kind: [type: {:in, [:count, :sum]}, default: :count],
+      field: [
+        type: :atom,
+        doc: "Summed attribute; required when kind is :sum, forbidden for :count."
+      ]
+    ]
   }
 
   @workflow %Spark.Dsl.Entity{
     name: :workflow,
     describe: "A named multi-stage workflow this app implements.",
-    examples: ["workflow :sales_pipeline do\n  stages [:lead, :won]\nend"],
+    examples: [
+      "workflow :sales_pipeline, resource: MyApp.Deal, field: :stage, stages: [:lead, :won]"
+    ],
     target: Workflow,
     args: [:name],
     schema: [
       name: [type: :atom, required: true],
+      resource: [
+        type: :module,
+        required: true,
+        doc: "Ash resource whose records move through these stages."
+      ],
+      field: [
+        type: :atom,
+        required: true,
+        doc: "Public attribute on `resource` holding the current stage."
+      ],
       stages: [type: {:list, :atom}, default: [], doc: "Ordered stage names."]
     ]
   }
@@ -116,7 +155,7 @@ defmodule Kumi.App.Dsl do
   @dashboard %Spark.Dsl.Entity{
     name: :dashboard,
     describe: "A named dashboard made of metrics.",
-    examples: ["dashboard :overview do\n  metric :pipeline_value\nend"],
+    examples: ["dashboard :overview do\n  metric :deal_count, resource: MyApp.Deal\nend"],
     target: Dashboard,
     args: [:name],
     entities: [metrics: [@metric]],

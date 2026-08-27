@@ -12,6 +12,9 @@ defmodule Mix.Tasks.Kumi.Plan do
       mix kumi.plan --verbose   # + per-operation provenance
       mix kumi.plan --probe     # + data-aware findings (reads live data,
                                  opt-in — see `Kumi.Probe`)
+      mix kumi.plan --fix-hints # + advisory remediation lines per operation
+                                 (ash.codegen vs manual SQL — see
+                                 `Kumi.Plan.FixHint`); never executes anything
       mix kumi.plan --app MyApp.App  # app-scoped plan (see `Kumi.plan_app/2`)
                                  instead of the default whole-database plan
 
@@ -36,7 +39,13 @@ defmodule Mix.Tasks.Kumi.Plan do
 
     {opts, _rest} =
       OptionParser.parse!(args,
-        strict: [check: :boolean, verbose: :boolean, probe: :boolean, app: :string]
+        strict: [
+          check: :boolean,
+          verbose: :boolean,
+          probe: :boolean,
+          fix_hints: :boolean,
+          app: :string
+        ]
       )
 
     plan = Mix.Tasks.Kumi.Resolve.build_plan(opts[:app], opts[:probe] || false)
@@ -46,7 +55,11 @@ defmodule Mix.Tasks.Kumi.Plan do
     if opts[:check], do: Mix.shell().info(Kumi.Plan.summary_line(plan))
 
     Mix.shell().info(
-      Kumi.Plan.Format.format(ops, verbose: opts[:verbose] || false, findings: plan.findings)
+      Kumi.Plan.Format.format(ops,
+        verbose: opts[:verbose] || false,
+        fix_hints: opts[:fix_hints] || false,
+        findings: plan.findings
+      )
     )
 
     if opts[:check] do

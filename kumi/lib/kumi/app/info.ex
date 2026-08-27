@@ -25,6 +25,10 @@ defmodule Kumi.App.Info do
   @spec navigation(module()) :: [module()]
   def navigation(app), do: Extension.get_opt(app, [:admin], :navigation, [])
 
+  @doc "Max child rows shown per has_many section on a detail page (`admin do related_limit ... end`)."
+  @spec related_limit(module()) :: pos_integer()
+  def related_limit(app), do: Extension.get_opt(app, [:admin], :related_limit, 10)
+
   @doc "The `workflow :name do ... end` entries."
   @spec workflows(module()) :: [Dsl.Workflow.t()]
   def workflows(app), do: Extension.get_entities(app, [:workflows])

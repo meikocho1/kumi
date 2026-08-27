@@ -39,6 +39,18 @@ defmodule Kumi.Plan.FormatTest do
     assert output =~ "1 safe / 0 review / 0 dangerous"
   end
 
+  test "fix_hints: true adds indented fix lines under each op; absent by default" do
+    col = %Column{name: "email", type: "text", nullable: false, default: nil}
+    ops = [{:add_column, "crm_accounts", col}]
+
+    with_hints = Format.format(ops, fix_hints: true)
+    without_hints = Format.format(ops)
+
+    assert with_hints =~ "\n      fix: mix ash.codegen"
+    assert with_hints =~ "ALTER TABLE crm_accounts ADD COLUMN email text NOT NULL;"
+    refute without_hints =~ "fix:"
+  end
+
   test "verbose mode adds a provenance line under each op" do
     output = Format.format([{:add_table, %Kumi.Schema.Table{name: "t"}}], verbose: true)
 

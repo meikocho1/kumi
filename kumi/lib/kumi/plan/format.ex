@@ -8,9 +8,14 @@ defmodule Kumi.Plan.Format do
   With the `:findings` option (a list of `Kumi.Plan.Finding`, from
   `Kumi.Probe` — see `Kumi.Plan.findings`), each finding is rendered as an
   extra indented line under the operation it was probed for.
+
+  With `fix_hints: true` (from `mix kumi.plan --fix-hints`), each operation
+  also gets indented `Kumi.Plan.FixHint` remediation lines. Advisory text
+  only — classification, summary counts and `--check` exit codes are
+  unaffected.
   """
 
-  alias Kumi.Plan.{Rename, Safety}
+  alias Kumi.Plan.{FixHint, Rename, Safety}
 
   @spec format([Kumi.Diff.op()], keyword()) :: String.t()
   def format(ops, opts \\ [])
@@ -18,6 +23,7 @@ defmodule Kumi.Plan.Format do
 
   def format(ops, opts) do
     verbose? = Keyword.get(opts, :verbose, false)
+    hints? = Keyword.get(opts, :fix_hints, false)
     snapshot_dir = Keyword.get(opts, :snapshot_dir, Rename.default_snapshot_dir())
     findings_by_op = opts |> Keyword.get(:findings, []) |> Enum.group_by(& &1.op)
 
@@ -28,7 +34,7 @@ defmodule Kumi.Plan.Format do
       |> Enum.group_by(fn {op, _classification} -> table_name(op) end)
       |> Enum.sort_by(fn {name, _entries} -> name end)
       |> Enum.map_join("\n", fn {table, table_entries} ->
-        format_table(table, table_entries, verbose?, snapshot_dir, findings_by_op)
+        format_table(table, table_entries, verbose?, hints?, snapshot_dir, findings_by_op)
       end)
 
     counts = Enum.frequencies_by(entries, fn {_op, {level, _reason}} -> level end)
@@ -43,13 +49,17 @@ defmodule Kumi.Plan.Format do
   defp table_name({_op, table, _entity}), do: table
   defp table_name({_op, table, _entity, _changes}), do: table
 
-  defp format_table(table, entries, verbose?, snapshot_dir, findings_by_op) do
+  defp format_table(table, entries, verbose?, hints?, snapshot_dir, findings_by_op) do
     "#{table}:\n" <>
-      Enum.map_join(entries, "\n", &format_entry(&1, verbose?, snapshot_dir, findings_by_op)) <>
+      Enum.map_join(
+        entries,
+        "\n",
+        &format_entry(&1, verbose?, hints?, snapshot_dir, findings_by_op)
+      ) <>
       "\n"
   end
 
-  defp format_entry({op, {level, reason}}, verbose?, snapshot_dir, findings_by_op) do
+  defp format_entry({op, {level, reason}}, verbose?, hints?, snapshot_dir, findings_by_op) do
     line = format_op(op) <> "  [#{label(level)}: #{reason}]"
 
     line =
@@ -59,10 +69,17 @@ defmodule Kumi.Plan.Format do
         line
       end
 
-    findings_by_op
-    |> Map.get(op, [])
-    |> Enum.map_join("", &("\n" <> finding_line(&1)))
-    |> then(&(line <> &1))
+    line =
+      findings_by_op
+      |> Map.get(op, [])
+      |> Enum.map_join("", &("\n" <> finding_line(&1)))
+      |> then(&(line <> &1))
+
+    if hints? do
+      line <> Enum.map_join(FixHint.lines(op), "", &"\n      #{&1}")
+    else
+      line
+    end
   end
 
   defp finding_line(%Kumi.Plan.Finding{note: note, query_description: query_description}),

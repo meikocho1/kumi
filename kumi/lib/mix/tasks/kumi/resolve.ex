@@ -15,16 +15,40 @@ defmodule Mix.Tasks.Kumi.Resolve do
   def build_plan(app_name, probe?)
 
   def build_plan(nil, probe?) do
-    otp_app = Mix.Project.config()[:app]
-    domains = Application.get_env(otp_app, :ash_domains, [])
-    repo = resolve_repo(domains)
-    Kumi.plan(repo, domains, probe: probe?)
+    domains = domains(nil)
+    Kumi.plan(repo(domains), domains, probe: probe?)
   end
 
   def build_plan(app_name, probe?) do
     app = Module.concat([app_name])
     Kumi.plan_app(app, probe: probe?)
   end
+
+  @doc """
+  Resolves the list of Ash domains for `--app` (or, given `nil`, the host
+  app's `:ash_domains` config — same rule `build_plan/2` uses). Exposed
+  separately (not just folded into `build_plan/2`) because `mix kumi.apply`
+  needs the domains themselves, not just the finished plan — see
+  `Kumi.Apply.run/3`'s `:domains` option.
+  """
+  @spec domains(String.t() | nil) :: [module()]
+  def domains(nil) do
+    otp_app = Mix.Project.config()[:app]
+    Application.get_env(otp_app, :ash_domains, [])
+  end
+
+  def domains(app_name) do
+    app_name
+    |> List.wrap()
+    |> Module.concat()
+    |> Kumi.App.Info.resources()
+    |> Enum.map(&Ash.Resource.Info.domain/1)
+    |> Enum.uniq()
+  end
+
+  @doc "Resolves the single repo shared across `domains` — see `build_plan/2`."
+  @spec repo([module()]) :: module()
+  def repo(domains), do: resolve_repo(domains)
 
   defp resolve_repo(domains) do
     repos =

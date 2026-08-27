@@ -27,6 +27,23 @@ defmodule Kumi.Resource.FieldSpec do
   def parse({:__block__, _, exprs}, env), do: Enum.map(exprs, &parse_expr(&1, env))
   def parse(expr, env), do: [parse_expr(expr, env)]
 
+  defp parse_expr({:field, _, [name, :image]}, _env) when is_atom(name) do
+    raise ArgumentError, image_missing_to_message(name)
+  end
+
+  defp parse_expr({:field, _, [name, :image, opts]}, env)
+       when is_atom(name) and is_list(opts) do
+    case Keyword.fetch(opts, :to) do
+      :error ->
+        raise ArgumentError, image_missing_to_message(name)
+
+      {:ok, dest_ast} ->
+        dest = resolve_module(dest_ast, env)
+        validate_attachment_target!(name, dest)
+        %__MODULE__{kind: :belongs_to, name: name, type: dest, opts: []}
+    end
+  end
+
   defp parse_expr({:field, _, [name, type]}, _env)
        when is_atom(name) and is_atom(type) do
     %__MODULE__{kind: :field, name: name, type: type, opts: []}
@@ -60,5 +77,35 @@ defmodule Kumi.Resource.FieldSpec do
         raise ArgumentError,
               "Kumi.Resource: expected a module reference, got: " <> Macro.to_string(other)
     end
+  end
+
+  defp validate_attachment_target!(name, module) do
+    with {:module, _} <- Code.ensure_compiled(module),
+         true <- Ash.Resource.Info.resource?(module) do
+      :ok
+    else
+      _ -> raise ArgumentError, image_bad_target_message(name, module)
+    end
+  end
+
+  defp image_missing_to_message(name) do
+    """
+    Kumi.Resource: `field #{inspect(name)}, :image` requires a `to:` target naming \
+    the Ash resource that stores the uploaded file's metadata, e.g.:
+
+        field #{inspect(name)}, :image, to: MyApp.Core.Attachment
+
+    Run `mix kumi_storage.install` to generate an Attachment resource.
+    """
+  end
+
+  defp image_bad_target_message(name, module) do
+    """
+    Kumi.Resource: `field #{inspect(name)}, :image, to: #{inspect(module)}` — \
+    #{inspect(module)} does not exist or is not an Ash resource.
+
+    Run `mix kumi_storage.install` to generate an Attachment resource, or point \
+    `to:` at an existing Ash resource.
+    """
   end
 end
