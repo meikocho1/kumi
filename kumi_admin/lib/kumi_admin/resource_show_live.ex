@@ -4,6 +4,16 @@ defmodule KumiAdmin.ResourceShowLive do
   `belongs_to` relationships rendered by a name-ish field when the related
   resource has one, else its id. Not found / no access renders honestly
   instead of crashing — same as `KumiAdmin.ResourceIndexLive`.
+
+  `has_many` relationships render as one child table per relationship
+  ("this Account's Deals"), one level deep only — depth is intentionally
+  capped at 1, and there is no export/API depth question yet since no API
+  surface exists. Each section is loaded with its own `Ash.load/3` call,
+  separate from the record's own `Ash.get/3` — mixing them into one `load:`
+  would mean a single policy-forbidden child resource flips the *entire*
+  page to the `:forbidden` state. Loading separately means one section can
+  fail honestly ("No access") while the record and every other section
+  still render.
   """
 
   use Phoenix.LiveView
@@ -13,13 +23,23 @@ defmodule KumiAdmin.ResourceShowLive do
   def mount(params, session, socket) do
     context = KumiAdmin.Context.resolve(session, params, socket)
 
-    socket =
-      socket
-      |> assign(app: context.app, mount_path: context.mount_path)
-      |> assign(actor: context.actor, resource: context.resource)
-      |> load_record(params["id"])
+    case KumiAdmin.Gate.check(context, socket) do
+      {:halt, socket} ->
+        {:ok, socket}
 
-    {:ok, socket}
+      {:cont, socket} ->
+        socket =
+          socket
+          |> assign(
+            app: context.app,
+            mount_path: context.mount_path,
+            sign_out_path: context.sign_out_path
+          )
+          |> assign(actor: context.actor, resource: context.resource)
+          |> load_record(params["id"])
+
+        {:ok, socket}
+    end
   end
 
   def handle_event("delete", _params, socket) do
@@ -55,6 +75,7 @@ defmodule KumiAdmin.ResourceShowLive do
           record: nil,
           attributes: [],
           relationships: [],
+          has_many_sections: [],
           can_update?: false,
           can_destroy?: false
         )
@@ -67,12 +88,28 @@ defmodule KumiAdmin.ResourceShowLive do
         case Ash.get(resource, id, opts) do
           {:ok, record} ->
             attributes = Ash.Resource.Info.public_attributes(resource)
+            related_limit = Kumi.App.Info.related_limit(socket.assigns.app)
+            admin_resources = Kumi.App.Info.resources(socket.assigns.app)
+
+            has_many_sections =
+              resource
+              |> has_many_relationships()
+              |> Enum.map(
+                &load_has_many_section(
+                  record,
+                  &1,
+                  related_limit,
+                  admin_resources,
+                  socket.assigns.actor
+                )
+              )
 
             assign(socket,
               error: nil,
               record: record,
               attributes: attributes,
               relationships: relationships,
+              has_many_sections: has_many_sections,
               can_update?: KumiAdmin.Capability.can_update?(record, socket.assigns.actor),
               can_destroy?: KumiAdmin.Capability.can_destroy?(record, socket.assigns.actor)
             )
@@ -83,6 +120,7 @@ defmodule KumiAdmin.ResourceShowLive do
               record: nil,
               attributes: [],
               relationships: [],
+              has_many_sections: [],
               can_update?: false,
               can_destroy?: false
             )
@@ -96,12 +134,80 @@ defmodule KumiAdmin.ResourceShowLive do
     |> Enum.filter(&(&1.type == :belongs_to))
   end
 
-  defp relationship_display(nil), do: "—"
-  defp relationship_display(related), do: KumiAdmin.Format.record_label(related)
+  defp has_many_relationships(resource) do
+    resource
+    |> Ash.Resource.Info.public_relationships()
+    |> Enum.filter(&(&1.type == :has_many))
+  end
+
+  # One child section per has_many, loaded independently of the parent
+  # `Ash.get` (see moduledoc). `related_limit + 1` rows are fetched so we
+  # can tell whether to show an "and more" line without a separate
+  # `Ash.count` — ponytail: no exact total, just a boolean overflow flag.
+  defp load_has_many_section(record, relationship, related_limit, admin_resources, actor) do
+    child_query =
+      relationship.destination
+      |> Ash.Query.sort(:id)
+      |> Ash.Query.limit(related_limit + 1)
+
+    result = Ash.load(record, [{relationship.name, child_query}], actor: actor)
+    build_has_many_section(relationship, admin_resources, related_limit, result)
+  end
+
+  # Split out from `load_has_many_section/5` so the section-building logic
+  # (including the forbidden-child branch) is unit-testable by injecting a
+  # prepared `{:ok, _} | {:error, _}` load result, without needing a real
+  # policy-forbidden Ash resource in the test fixtures.
+  @doc false
+  def build_has_many_section(relationship, admin_resources, related_limit, load_result) do
+    destination = relationship.destination
+
+    base = %{
+      relationship: relationship,
+      destination: destination,
+      columns: KumiAdmin.Columns.for_resource(destination),
+      linkable?: destination in admin_resources
+    }
+
+    case load_result do
+      {:ok, loaded} ->
+        all_rows = Map.get(loaded, relationship.name)
+
+        Map.merge(base, %{
+          rows: Enum.take(all_rows, related_limit),
+          has_more?: length(all_rows) > related_limit,
+          error: nil
+        })
+
+      {:error, _reason} ->
+        Map.merge(base, %{rows: [], has_more?: false, error: :forbidden})
+    end
+  end
+
+  defp relationship_display(nil, _relationship), do: "—"
+
+  defp relationship_display(related, relationship) do
+    destination = relationship.destination
+
+    if Code.ensure_loaded?(destination) and
+         function_exported?(destination, :__kumi_attachment_url__, 1) do
+      {:link, destination.__kumi_attachment_url__(related),
+       KumiAdmin.Format.record_label(related)}
+    else
+      {:text, KumiAdmin.Format.record_label(related)}
+    end
+  end
 
   def render(assigns) do
     ~H"""
-    <Shell.shell app={@app} mount_path={@mount_path} active_resource={@resource} flash={@flash}>
+    <Shell.shell
+      app={@app}
+      mount_path={@mount_path}
+      active_resource={@resource}
+      actor={@actor}
+      sign_out_path={@sign_out_path}
+      flash={@flash}
+    >
       <a
         :if={@resource}
         href={"#{@mount_path}/#{KumiAdmin.Slug.for_resource(@resource)}"}
@@ -146,8 +252,47 @@ defmodule KumiAdmin.ResourceShowLive do
         <div :for={relationship <- @relationships} class="kumi-admin-field">
           <span class="kumi-admin-field-label">{Phoenix.Naming.humanize(relationship.name)}</span>
           <span class="kumi-admin-field-value">
-            {relationship_display(Map.get(@record, relationship.name))}
+            <% display = relationship_display(Map.get(@record, relationship.name), relationship) %>
+            <a :if={match?({:link, _, _}, display)} href={elem(display, 1)}>{elem(display, 2)}</a>
+            <span :if={match?({:text, _}, display)}>{elem(display, 1)}</span>
           </span>
+        </div>
+
+        <div :for={section <- @has_many_sections} class="kumi-admin-field">
+          <h2 class="kumi-admin-title">{KumiAdmin.Label.plural(section.destination)}</h2>
+
+          <p :if={section.error == :forbidden} class="kumi-admin-empty">No access.</p>
+
+          <p :if={section.error == nil and section.rows == []} class="kumi-admin-empty">
+            No records yet.
+          </p>
+
+          <table :if={section.error == nil and section.rows != []} class="kumi-admin-table">
+            <thead>
+              <tr>
+                <th :for={column <- section.columns}>{Phoenix.Naming.humanize(column)}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr :for={child <- section.rows}>
+                <td :for={column <- section.columns}>
+                  <a
+                    :if={column == :id and section.linkable?}
+                    href={"#{@mount_path}/#{KumiAdmin.Slug.for_resource(section.destination)}/#{child.id}"}
+                  >
+                    {KumiAdmin.Format.cell(column, Map.get(child, column))}
+                  </a>
+                  <span :if={column != :id or !section.linkable?}>
+                    {KumiAdmin.Format.cell(column, Map.get(child, column))}
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <p :if={section.error == nil and section.has_more?} class="kumi-admin-empty">
+            …and more.
+          </p>
         </div>
       </div>
     </Shell.shell>

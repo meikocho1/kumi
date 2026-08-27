@@ -25,17 +25,28 @@ defmodule KumiAdmin.ResourceIndexLive do
   def mount(params, session, socket) do
     context = KumiAdmin.Context.resolve(session, params, socket)
 
-    socket =
-      socket
-      |> assign(app: context.app, mount_path: context.mount_path)
-      |> assign(actor: context.actor, resource: context.resource, offset: 0, search: "")
-      |> assign(
-        can_create?:
-          !!context.resource && KumiAdmin.Capability.can_create?(context.resource, context.actor)
-      )
-      |> load_page()
+    case KumiAdmin.Gate.check(context, socket) do
+      {:halt, socket} ->
+        {:ok, socket}
 
-    {:ok, socket}
+      {:cont, socket} ->
+        socket =
+          socket
+          |> assign(
+            app: context.app,
+            mount_path: context.mount_path,
+            sign_out_path: context.sign_out_path
+          )
+          |> assign(actor: context.actor, resource: context.resource, offset: 0, search: "")
+          |> assign(
+            can_create?:
+              !!context.resource &&
+                KumiAdmin.Capability.can_create?(context.resource, context.actor)
+          )
+          |> load_page()
+
+        {:ok, socket}
+    end
   end
 
   def handle_event("next", _params, socket) do
@@ -53,11 +64,18 @@ defmodule KumiAdmin.ResourceIndexLive do
   defp load_page(socket) do
     case socket.assigns.resource do
       nil ->
-        assign(socket, error: :not_found, columns: [], records: [], has_more?: false)
+        assign(socket,
+          error: :not_found,
+          columns: [],
+          attachment_relationships: %{},
+          records: [],
+          has_more?: false
+        )
 
       resource ->
         columns = KumiAdmin.Columns.for_resource(resource)
         search_fields = KumiAdmin.Search.searchable_fields(resource)
+        attachment_relationships = attachment_relationships_by_source(resource, columns)
 
         query =
           resource
@@ -65,25 +83,84 @@ defmodule KumiAdmin.ResourceIndexLive do
           |> KumiAdmin.Search.apply(search_fields, socket.assigns.search)
           |> Ash.Query.limit(@page_size + 1)
           |> Ash.Query.offset(socket.assigns.offset)
+          |> Ash.Query.load(Map.values(attachment_relationships) |> Enum.map(& &1.name))
 
         case Ash.read(query, actor: socket.assigns.actor) do
           {:ok, results} ->
             assign(socket,
               error: nil,
               columns: columns,
+              attachment_relationships: attachment_relationships,
               records: Enum.take(results, @page_size),
               has_more?: length(results) > @page_size
             )
 
           {:error, _reason} ->
-            assign(socket, error: :forbidden, columns: columns, records: [], has_more?: false)
+            assign(socket,
+              error: :forbidden,
+              columns: columns,
+              attachment_relationships: attachment_relationships,
+              records: [],
+              has_more?: false
+            )
         end
     end
   end
 
+  # `{url, label}` for an attachment column with a loaded, non-nil
+  # relationship value — `nil` otherwise (plain column, or attachment
+  # column with no file attached).
+  defp attachment_link(record, column, attachment_relationships) do
+    case Map.get(attachment_relationships, column) do
+      nil ->
+        nil
+
+      relationship ->
+        case Map.get(record, relationship.name) do
+          nil ->
+            nil
+
+          %Ash.NotLoaded{} ->
+            nil
+
+          related ->
+            destination = relationship.destination
+
+            if Code.ensure_loaded?(destination) and
+                 function_exported?(destination, :__kumi_attachment_url__, 1) do
+              {destination.__kumi_attachment_url__(related),
+               KumiAdmin.Format.record_label(related)}
+            end
+        end
+    end
+  end
+
+  # A belongs_to's FK attribute (e.g. `:avatar_id`) that made it into
+  # `columns` and whose destination is a host-generated Attachment
+  # resource (blueprint §6 point 3 marker) renders as a link instead of
+  # its raw uuid.
+  defp attachment_relationships_by_source(resource, columns) do
+    columns = MapSet.new(columns)
+
+    resource
+    |> Ash.Resource.Info.public_relationships()
+    |> Enum.filter(fn relationship ->
+      relationship.type == :belongs_to and
+        MapSet.member?(columns, relationship.source_attribute) and
+        KumiAdmin.FormFields.attachment?(relationship.destination)
+    end)
+    |> Map.new(&{&1.source_attribute, &1})
+  end
+
   def render(assigns) do
     ~H"""
-    <Shell.shell app={@app} mount_path={@mount_path} active_resource={@resource}>
+    <Shell.shell
+      app={@app}
+      mount_path={@mount_path}
+      active_resource={@resource}
+      actor={@actor}
+      sign_out_path={@sign_out_path}
+    >
       <div class="kumi-admin-actions">
         <h1 class="kumi-admin-title">
           {@resource && KumiAdmin.Label.plural(@resource)}
@@ -140,7 +217,11 @@ defmodule KumiAdmin.ResourceIndexLive do
               >
                 {KumiAdmin.Format.cell(column, Map.get(record, column))}
               </a>
-              <span :if={column != :id}>
+              <% attachment = attachment_link(record, column, @attachment_relationships) %>
+              <a :if={column != :id and attachment} href={elem(attachment, 0)}>
+                {elem(attachment, 1)}
+              </a>
+              <span :if={column != :id and !attachment}>
                 {KumiAdmin.Format.cell(column, Map.get(record, column))}
               </span>
             </td>

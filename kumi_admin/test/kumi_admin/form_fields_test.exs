@@ -2,7 +2,7 @@ defmodule KumiAdmin.FormFieldsTest do
   use ExUnit.Case, async: true
 
   alias KumiAdmin.FormFields
-  alias KumiAdmin.Test.{Contact, Widget}
+  alias KumiAdmin.Test.{Attachment, Contact, Person, Widget}
 
   describe "for_action/2 — field derivation" do
     test "only fields in the create action's accept list are returned, in declaration order" do
@@ -30,6 +30,14 @@ defmodule KumiAdmin.FormFieldsTest do
 
       assert {:belongs_to, relationship} = account_field.widget
       assert relationship.destination == KumiAdmin.Test.Account
+    end
+
+    test "a belongs_to whose destination marks itself __kumi_attachment__ derives as :upload" do
+      fields = FormFields.for_action(Person, :create)
+      avatar_field = Enum.find(fields, &(&1.attribute.name == :avatar_id))
+
+      assert {:upload, relationship} = avatar_field.widget
+      assert relationship.destination == Attachment
     end
   end
 
@@ -89,6 +97,23 @@ defmodule KumiAdmin.FormFieldsTest do
       relationship = %{destination: KumiAdmin.Test.Account}
 
       assert FormFields.widget(attribute, relationship) == {:belongs_to, relationship}
+    end
+
+    test "a belongs_to into a module marked __kumi_attachment__ derives as :upload, not :belongs_to" do
+      attribute = attribute(:avatar_id, Ash.Type.UUID)
+      relationship = %{destination: KumiAdmin.Test.MarkerOnly}
+
+      assert FormFields.widget(attribute, relationship) == {:upload, relationship}
+    end
+  end
+
+  describe "attachment?/1" do
+    test "true for a module exporting __kumi_attachment__/0" do
+      assert FormFields.attachment?(KumiAdmin.Test.MarkerOnly)
+    end
+
+    test "false for an ordinary module" do
+      refute FormFields.attachment?(KumiAdmin.Test.Account)
     end
   end
 

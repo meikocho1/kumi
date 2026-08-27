@@ -24,6 +24,7 @@ defmodule KumiAdmin.FormFields do
           | :datetime_local
           | {:select, [atom()]}
           | {:belongs_to, Ash.Resource.Relationships.BelongsTo.t()}
+          | {:upload, Ash.Resource.Relationships.BelongsTo.t()}
 
   @type field :: %{attribute: Ash.Resource.Attribute.t(), widget: widget()}
 
@@ -51,12 +52,18 @@ defmodule KumiAdmin.FormFields do
 
   @doc """
   The input widget for a single attribute, given the `belongs_to`
-  relationship it backs (`nil` if it's a plain attribute).
+  relationship it backs (`nil` if it's a plain attribute). A `belongs_to`
+  whose destination exports `__kumi_attachment__/0` (the host-generated
+  Attachment resource marker, blueprint §6 point 3) derives as `:upload`
+  instead of a plain `:belongs_to` select — kumi_admin never checks for
+  `kumi_storage` itself, only this marker function.
   """
   @spec widget(Ash.Resource.Attribute.t(), Ash.Resource.Relationships.BelongsTo.t() | nil) ::
           widget()
-  def widget(_attribute, relationship) when not is_nil(relationship),
-    do: {:belongs_to, relationship}
+  def widget(_attribute, %{destination: destination} = relationship)
+      when not is_nil(relationship) do
+    if attachment?(destination), do: {:upload, relationship}, else: {:belongs_to, relationship}
+  end
 
   def widget(%{type: Ash.Type.Boolean}, nil), do: :checkbox
   def widget(%{type: t}, nil) when t in [Ash.Type.Integer], do: :number
@@ -84,6 +91,17 @@ defmodule KumiAdmin.FormFields do
   end
 
   def widget(_attribute, nil), do: :text
+
+  @doc """
+  True if `module` is a host-generated Attachment resource (blueprint §6
+  point 3 marker). `function_exported?/3` never loads a module itself
+  (only checks modules already loaded) — `Code.ensure_loaded?/1` first is
+  required, or a destination that's merely been referenced (not yet
+  called) reads as `false` even when the marker is really there.
+  """
+  @spec attachment?(module()) :: boolean()
+  def attachment?(module),
+    do: Code.ensure_loaded?(module) and function_exported?(module, :__kumi_attachment__, 0)
 
   defp long_text?(attribute) do
     is_nil(Keyword.get(attribute.constraints || [], :max_length)) and

@@ -23,6 +23,12 @@ defmodule Mix.Tasks.KumiAdmin.Install.Docs do
     Otherwise nothing is guessed — a notice is printed with the snippet to
     add by hand, since a wrong `on_mount`/actor guess is worse than asking.
 
+    When a `<App>.Accounts.User` module exists (the conventional
+    `ash_authentication` user resource), `user_resource:` is set so a
+    fresh install with zero users redirects to `register_path:
+    "/register"` instead of sign-in — see `KumiAdmin.Gate`. Otherwise the
+    option is omitted and the notice says so.
+
     ## Example
 
     ```bash
@@ -82,7 +88,11 @@ if Code.ensure_loaded?(Igniter) do
 
               kumi_admin "/kumi-admin",
                 app: #{inspect(app_module)},
-                on_mount: [{MyAppWeb.LiveUserAuth, :current_user}]
+                on_mount: [{MyAppWeb.LiveUserAuth, :current_user}],
+                sign_out_path: "/sign-out",
+                sign_in_path: "/sign-in",
+                user_resource: MyApp.Accounts.User,
+                register_path: "/register"
           """)
 
         already_mounted?(igniter, router) ->
@@ -93,7 +103,8 @@ if Code.ensure_loaded?(Igniter) do
 
         true ->
           {igniter, auth_module} = detect_live_user_auth(igniter)
-          do_mount(igniter, router, app_module, auth_module)
+          {igniter, user_module} = detect_user_resource(igniter)
+          do_mount(igniter, router, app_module, auth_module, user_module)
       end
     end
 
@@ -136,7 +147,15 @@ if Code.ensure_loaded?(Igniter) do
       )
     end
 
-    defp do_mount(igniter, router, app_module, nil) do
+    # Only auto-wires when the conventional ash_authentication user
+    # resource actually exists — never guessed.
+    defp detect_user_resource(igniter) do
+      user_module = Igniter.Project.Module.module_name(igniter, "Accounts.User")
+      {exists?, igniter} = Igniter.Project.Module.module_exists(igniter, user_module)
+      {igniter, if(exists?, do: user_module)}
+    end
+
+    defp do_mount(igniter, router, app_module, nil, _user_module) do
       igniter
       |> Igniter.add_notice("""
       Kumi Admin: could not confirm an authenticated LiveView hook, so
@@ -147,28 +166,45 @@ if Code.ensure_loaded?(Igniter) do
 
           kumi_admin "/kumi-admin",
             app: #{inspect(app_module)},
-            on_mount: [{MyAppWeb.LiveUserAuth, :current_user}]
+            on_mount: [{MyAppWeb.LiveUserAuth, :current_user}],
+            sign_out_path: "/sign-out",
+            sign_in_path: "/sign-in",
+            user_resource: MyApp.Accounts.User,
+            register_path: "/register"
 
       See `KumiAdmin.Router`'s moduledoc for what `:on_mount`/`:actor` need
       to provide.
       """)
     end
 
-    defp do_mount(igniter, router, app_module, auth_module) do
+    defp do_mount(igniter, router, app_module, auth_module, user_module) do
+      user_resource_line =
+        if user_module,
+          do: ",\n  user_resource: #{inspect(user_module)},\n  register_path: \"/register\""
+
       contents = """
       pipe_through :browser
       import KumiAdmin.Router
 
       kumi_admin "/kumi-admin",
         app: #{inspect(app_module)},
-        on_mount: [{#{inspect(auth_module)}, :current_user}]
+        on_mount: [{#{inspect(auth_module)}, :current_user}],
+        sign_out_path: "/sign-out",
+        sign_in_path: "/sign-in"#{user_resource_line}
       """
+
+      user_notice =
+        if user_module do
+          "and #{inspect(user_module)} for first-user onboarding (redirects to /register when it has zero records)."
+        else
+          "no #{inspect(Igniter.Project.Module.module_name(igniter, "Accounts.User"))} module was found, so first-user onboarding (register-on-empty) was not wired — add `user_resource:`/`register_path:` yourself if you have a user resource under a different name."
+        end
 
       igniter
       |> Igniter.Libs.Phoenix.add_scope("/", contents, router: router, placement: :after)
       |> Igniter.add_notice("""
       Kumi Admin: mounted at /kumi-admin in #{inspect(router)}, using
-      #{inspect(auth_module)} to resolve the actor.
+      #{inspect(auth_module)} to resolve the actor, #{user_notice}
       """)
     end
   end

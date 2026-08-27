@@ -21,7 +21,30 @@ defmodule KumiAdmin.Router do
       itself. See `KumiAdmin.Actor`.
     * `:actor` — `{Module, :function}` resolving the Ash actor from the
       mounted socket. Defaults to `{KumiAdmin.Actor, :from_current_user}`.
+    * `:sign_out_path` — href for the shell's "Sign out" link. Defaults to
+      `"/sign-out"`. KumiAdmin does not implement sign-out itself; point
+      this at the host's real route.
+    * `:sign_in_path` — redirect target when a LiveView mounts with no
+      actor (and either `:user_resource` is unset or already has users).
+      Defaults to `"/sign-in"`. KumiAdmin does not implement sign-in
+      itself; point this at the host's real route.
+    * `:user_resource` — the host's user resource (e.g.
+      `MyApp.Accounts.User`), optional, default `nil`. When set, an
+      actor-less mount redirects to `:register_path` instead of
+      `:sign_in_path` if this resource currently has zero records — a
+      fresh install's "create the first user" onboarding. See
+      `KumiAdmin.Gate`.
+    * `:register_path` — redirect target for the zero-users case above.
+      Defaults to `"/register"`.
     * `:live_session_name` — defaults to `:kumi_admin`.
+
+  ## Auth gate
+
+  KumiAdmin is a post-login experience: every LiveView calls
+  `KumiAdmin.Gate.check/2` right after resolving the session, and an
+  actor-less visit never renders the shell — it redirects (to
+  `:register_path` on a fresh install with zero users, to `:sign_in_path`
+  otherwise). See `KumiAdmin.Gate`.
 
   ## Actor handoff
 
@@ -40,12 +63,18 @@ defmodule KumiAdmin.Router do
 
       app = Keyword.fetch!(opts, :app)
       actor_fun = Keyword.get(opts, :actor, {KumiAdmin.Actor, :from_current_user})
+      sign_out_path = Keyword.get(opts, :sign_out_path, "/sign-out")
+      sign_in_path = Keyword.get(opts, :sign_in_path, "/sign-in")
+      user_resource = Keyword.get(opts, :user_resource, nil)
+      register_path = Keyword.get(opts, :register_path, "/register")
       on_mount_hooks = Keyword.get(opts, :on_mount, [])
       live_session_name = Keyword.get(opts, :live_session_name, :kumi_admin)
 
       live_session live_session_name,
         on_mount: on_mount_hooks,
-        session: {KumiAdmin.Router, :__session__, [path, app, actor_fun]} do
+        session:
+          {KumiAdmin.Router, :__session__,
+           [path, app, actor_fun, sign_out_path, sign_in_path, user_resource, register_path]} do
         live path, KumiAdmin.DashboardLive, :dashboard
         live "#{path}/:resource", KumiAdmin.ResourceIndexLive, :index
         live "#{path}/:resource/new", KumiAdmin.ResourceFormLive, :new
@@ -56,11 +85,24 @@ defmodule KumiAdmin.Router do
   end
 
   @doc false
-  def __session__(conn, path, app, actor_fun) do
+  def __session__(
+        conn,
+        path,
+        app,
+        actor_fun,
+        sign_out_path,
+        sign_in_path,
+        user_resource,
+        register_path
+      ) do
     conn
     |> Plug.Conn.get_session()
     |> Map.put("kumi_admin_path", path)
     |> Map.put("kumi_admin_app", app)
     |> Map.put("kumi_admin_actor", actor_fun)
+    |> Map.put("kumi_admin_sign_out_path", sign_out_path)
+    |> Map.put("kumi_admin_sign_in_path", sign_in_path)
+    |> Map.put("kumi_admin_user_resource", user_resource)
+    |> Map.put("kumi_admin_register_path", register_path)
   end
 end

@@ -32,6 +32,12 @@ defmodule Mix.Tasks.KumiAdmin.InstallTest do
   end
   """
 
+  @accounts_user """
+  defmodule MyApp.Accounts.User do
+    defstruct [:id, :email]
+  end
+  """
+
   test "no router found: warns with a manual snippet, mounts nothing" do
     igniter =
       test_project(app_name: :my_app)
@@ -75,6 +81,54 @@ defmodule Mix.Tasks.KumiAdmin.InstallTest do
     assert content =~ "kumi_admin"
     assert content =~ "MyAppWeb.LiveUserAuth"
     assert content =~ ":current_user"
+  end
+
+  test "router + LiveUserAuth + Accounts.User: mount includes user_resource and register_path" do
+    igniter =
+      test_project(
+        app_name: :my_app,
+        files: %{
+          "lib/my_app_web/router.ex" => @router,
+          "lib/my_app_web/live_user_auth.ex" => @live_user_auth_with_current_user,
+          "lib/my_app/accounts/user.ex" => @accounts_user
+        }
+      )
+      |> Igniter.compose_task("kumi_admin.install", [])
+
+    {_igniter, source, _zipper} =
+      Igniter.Project.Module.find_module!(igniter, MyAppWeb.Router)
+
+    content = Rewrite.Source.get(source, :content)
+
+    assert content =~ "user_resource: MyApp.Accounts.User"
+    assert content =~ ~s(register_path: "/register")
+
+    assert Enum.any?(igniter.notices, fn n ->
+             IO.iodata_to_binary(n) =~ "MyApp.Accounts.User"
+           end)
+  end
+
+  test "router + LiveUserAuth, no Accounts.User: mount omits user_resource and says so" do
+    igniter =
+      test_project(
+        app_name: :my_app,
+        files: %{
+          "lib/my_app_web/router.ex" => @router,
+          "lib/my_app_web/live_user_auth.ex" => @live_user_auth_with_current_user
+        }
+      )
+      |> Igniter.compose_task("kumi_admin.install", [])
+
+    {_igniter, source, _zipper} =
+      Igniter.Project.Module.find_module!(igniter, MyAppWeb.Router)
+
+    content = Rewrite.Source.get(source, :content)
+
+    refute content =~ "user_resource"
+
+    assert Enum.any?(igniter.notices, fn n ->
+             IO.iodata_to_binary(n) =~ "no MyApp.Accounts.User module was found"
+           end)
   end
 
   test "running twice does not duplicate the mount" do

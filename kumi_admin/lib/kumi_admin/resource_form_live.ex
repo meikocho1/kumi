@@ -15,16 +15,31 @@ defmodule KumiAdmin.ResourceFormLive do
 
   alias KumiAdmin.Components.Shell
 
+  # Image-only for v1, matching KumiStorage.Validation's default content-type
+  # allowlist. A single file: the widget replaces, it never appends.
+  @upload_extensions ~w(.jpg .jpeg .png .gif .webp)
+
   def mount(params, session, socket) do
     context = KumiAdmin.Context.resolve(session, params, socket)
 
-    socket =
-      socket
-      |> assign(app: context.app, mount_path: context.mount_path)
-      |> assign(actor: context.actor, resource: context.resource)
-      |> load_form(params["id"])
+    case KumiAdmin.Gate.check(context, socket) do
+      {:halt, socket} ->
+        {:ok, socket}
 
-    {:ok, socket}
+      {:cont, socket} ->
+        socket =
+          socket
+          |> assign(
+            app: context.app,
+            mount_path: context.mount_path,
+            sign_out_path: context.sign_out_path
+          )
+          |> assign(actor: context.actor, resource: context.resource)
+          |> load_form(params["id"])
+          |> allow_uploads()
+
+        {:ok, socket}
+    end
   end
 
   def handle_event("validate", %{"form" => params}, socket) do
@@ -32,21 +47,95 @@ defmodule KumiAdmin.ResourceFormLive do
   end
 
   def handle_event("save", %{"form" => params}, socket) do
-    case AshPhoenix.Form.submit(socket.assigns.form, params: params) do
-      {:ok, record} ->
-        slug = KumiAdmin.Slug.for_resource(socket.assigns.resource)
-        verb = if socket.assigns.mode == :new, do: "created", else: "updated"
+    case apply_uploads(socket, params) do
+      {:ok, params} ->
+        case AshPhoenix.Form.submit(socket.assigns.form, params: params) do
+          {:ok, record} ->
+            slug = KumiAdmin.Slug.for_resource(socket.assigns.resource)
+            verb = if socket.assigns.mode == :new, do: "created", else: "updated"
 
-        {:noreply,
-         socket
-         |> put_flash(:info, "#{Phoenix.Naming.humanize(slug)} #{verb}.")
-         |> push_navigate(to: "#{socket.assigns.mount_path}/#{slug}/#{record.id}")}
+            {:noreply,
+             socket
+             |> put_flash(:info, "#{Phoenix.Naming.humanize(slug)} #{verb}.")
+             |> push_navigate(to: "#{socket.assigns.mount_path}/#{slug}/#{record.id}")}
 
-      {:error, form} ->
-        {:noreply,
-         socket
-         |> put_flash(:error, submit_error_message(form))
-         |> assign(form: form)}
+          {:error, form} ->
+            {:noreply,
+             socket
+             |> put_flash(:error, submit_error_message(form))
+             |> assign(form: form)}
+        end
+
+      {:error, message} ->
+        {:noreply, put_flash(socket, :error, message)}
+    end
+  end
+
+  # `:uploads` is a LiveView-reserved assign — it can only be set via
+  # `allow_upload/3` (never plain `assign`/`assign_new`), so a resource
+  # with no upload fields simply never gets the key at all. The template
+  # reads it defensively (`Map.get(assigns, :uploads, %{})`) rather than
+  # `@uploads`, which would raise for that case.
+  defp allow_uploads(socket) do
+    socket.assigns.fields
+    |> Enum.filter(&match?({:upload, _}, &1.widget))
+    |> Enum.reduce(socket, fn %{widget: {:upload, relationship}}, socket ->
+      allow_upload(socket, relationship.name, accept: @upload_extensions, max_entries: 1)
+    end)
+  end
+
+  # Consumes each upload field's selected file (if any), creating the
+  # Attachment via its host-generated `:upload` action (blueprint §6 point
+  # 8 — kumi_admin never touches storage directly) and merging the
+  # resulting id into `params` as the belongs_to's FK. A field left
+  # untouched (no new file picked) is simply absent from `params`, so an
+  # existing attachment on edit is left as-is — replacing it is the only
+  # way to change it, and the old attachment is then an intentional
+  # orphan (blueprint §6 point 9's documented deferral).
+  defp apply_uploads(socket, params) do
+    socket.assigns.fields
+    |> Enum.filter(&match?({:upload, _}, &1.widget))
+    |> Enum.reduce_while({:ok, params}, fn %{
+                                             attribute: attribute,
+                                             widget: {:upload, relationship}
+                                           },
+                                           {:ok, params} ->
+      case consume_upload(socket, relationship) do
+        {:ok, nil} ->
+          {:cont, {:ok, params}}
+
+        {:ok, attachment} ->
+          {:cont, {:ok, Map.put(params, Atom.to_string(attribute.name), attachment.id)}}
+
+        {:error, message} ->
+          {:halt, {:error, message}}
+      end
+    end)
+  end
+
+  defp consume_upload(socket, relationship) do
+    actor = socket.assigns.actor
+
+    result =
+      consume_uploaded_entries(socket, relationship.name, fn %{path: path}, entry ->
+        {:ok,
+         Ash.create(
+           relationship.destination,
+           %{
+             source: {:path, path},
+             filename: entry.client_name,
+             content_type: entry.client_type,
+             byte_size: entry.client_size
+           },
+           action: :upload,
+           actor: actor
+         )}
+      end)
+
+    case result do
+      [] -> {:ok, nil}
+      [{:ok, attachment} | _] -> {:ok, attachment}
+      [{:error, _reason} | _] -> {:error, "You don't have permission to do that."}
     end
   end
 
@@ -68,6 +157,7 @@ defmodule KumiAdmin.ResourceFormLive do
           mode: nil,
           fields: [],
           form: nil,
+          record: nil,
           belongs_to_options: %{}
         )
 
@@ -87,6 +177,7 @@ defmodule KumiAdmin.ResourceFormLive do
       mode: :new,
       fields: fields,
       form: form,
+      record: nil,
       belongs_to_options: belongs_to_options(fields, actor)
     )
   end
@@ -98,6 +189,7 @@ defmodule KumiAdmin.ResourceFormLive do
       {:ok, record} ->
         action = Ash.Resource.Info.primary_action!(resource, :update).name
         fields = KumiAdmin.FormFields.for_action(resource, :update)
+        record = load_upload_relationships(record, fields, actor)
         form = AshPhoenix.Form.for_update(record, action, actor: actor) |> to_form()
 
         assign(socket,
@@ -105,6 +197,7 @@ defmodule KumiAdmin.ResourceFormLive do
           mode: :edit,
           fields: fields,
           form: form,
+          record: record,
           belongs_to_options: belongs_to_options(fields, actor)
         )
 
@@ -114,8 +207,29 @@ defmodule KumiAdmin.ResourceFormLive do
           mode: nil,
           fields: [],
           form: nil,
+          record: nil,
           belongs_to_options: %{}
         )
+    end
+  end
+
+  # Preloads each upload field's belongs_to so the form can show a "current
+  # file" link (blueprint §6 point 9 — via `__kumi_attachment_url__/1`).
+  defp load_upload_relationships(record, fields, actor) do
+    relationship_names =
+      fields
+      |> Enum.filter(&match?({:upload, _}, &1.widget))
+      |> Enum.map(fn %{widget: {:upload, relationship}} -> relationship.name end)
+
+    case relationship_names do
+      [] ->
+        record
+
+      names ->
+        case Ash.load(record, names, actor: actor) do
+          {:ok, loaded} -> loaded
+          {:error, _reason} -> record
+        end
     end
   end
 
@@ -145,6 +259,31 @@ defmodule KumiAdmin.ResourceFormLive do
 
   defp truthy?(value), do: value in [true, "true", "on"]
 
+  defp upload_config(uploads, {:upload, relationship}), do: Map.get(uploads, relationship.name)
+  defp upload_config(_uploads, _widget), do: nil
+
+  defp current_attachment_url(nil, _widget), do: nil
+
+  defp current_attachment_url(record, {:upload, relationship}) do
+    case Map.get(record, relationship.name) do
+      nil ->
+        nil
+
+      %Ash.NotLoaded{} ->
+        nil
+
+      attachment ->
+        destination = relationship.destination
+
+        if Code.ensure_loaded?(destination) and
+             function_exported?(destination, :__kumi_attachment_url__, 1) do
+          destination.__kumi_attachment_url__(attachment)
+        end
+    end
+  end
+
+  defp current_attachment_url(_record, _widget), do: nil
+
   defp translate_error({msg, opts}) when is_list(opts) do
     Enum.reduce(opts, msg, fn {key, value}, acc ->
       String.replace(acc, "%{#{key}}", to_string(value))
@@ -157,6 +296,8 @@ defmodule KumiAdmin.ResourceFormLive do
   attr :field, Phoenix.HTML.FormField, required: true
   attr :widget, :any, required: true
   attr :options, :list, default: []
+  attr :upload, :any, default: nil
+  attr :current_url, :any, default: nil
 
   defp field_input(assigns) do
     ~H"""
@@ -219,12 +360,31 @@ defmodule KumiAdmin.ResourceFormLive do
         {label}
       </option>
     </select>
+    <div :if={match?({:upload, _}, @widget)} class="kumi-admin-upload">
+      <a :if={@current_url} href={@current_url} class="kumi-admin-current-file">Current file</a>
+      <.live_file_input upload={@upload} />
+      <p :for={err <- upload_errors(@upload)} class="kumi-admin-field-error">
+        {upload_error_message(err)}
+      </p>
+    </div>
     """
   end
 
+  defp upload_error_message(:too_large), do: "File is too large."
+  defp upload_error_message(:too_many_files), do: "Only one file allowed."
+  defp upload_error_message(:not_accepted), do: "File type not accepted."
+  defp upload_error_message(reason), do: "Upload error: #{inspect(reason)}"
+
   def render(assigns) do
     ~H"""
-    <Shell.shell app={@app} mount_path={@mount_path} active_resource={@resource} flash={@flash}>
+    <Shell.shell
+      app={@app}
+      mount_path={@mount_path}
+      active_resource={@resource}
+      actor={@actor}
+      sign_out_path={@sign_out_path}
+      flash={@flash}
+    >
       <a
         :if={@resource}
         href={"#{@mount_path}/#{KumiAdmin.Slug.for_resource(@resource)}"}
@@ -256,6 +416,8 @@ defmodule KumiAdmin.ResourceFormLive do
             field={@form[field.attribute.name]}
             widget={field.widget}
             options={Map.get(@belongs_to_options, field.attribute.name, [])}
+            upload={upload_config(Map.get(assigns, :uploads, %{}), field.widget)}
+            current_url={current_attachment_url(@record, field.widget)}
           />
           <p :for={msg <- @form[field.attribute.name].errors} class="kumi-admin-field-error">
             {translate_error(msg)}
