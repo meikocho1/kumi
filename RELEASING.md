@@ -126,7 +126,10 @@ so they're listed here so they don't get forgotten:
 
 ```bash
 # Require CI to pass and a review before merging to main.
-# The four contexts are the CI job names, one per package.
+# The four contexts below are the exact names GitHub reports for the
+# matrix jobs — verified with `gh pr checks <n>` on a real pull request,
+# not inferred from the workflow file. A context string that doesn't
+# match makes branch protection permanently unsatisfiable, silently.
 gh api -X PUT repos/:owner/:repo/branches/main/protection \
   -H "Accept: application/vnd.github+json" \
   -f 'required_status_checks[strict]=true' \
@@ -140,9 +143,11 @@ gh api -X PUT repos/:owner/:repo/branches/main/protection \
 ```
 
 - [ ] Branch protection on `main` (above).
-- [ ] Squash-merge only, so PR titles become the commit log —
-      `CONTRIBUTING.md` tells contributors to write PR titles as
-      conventional-commit lines.
+- [ ] **Enable squash-merge and disable merge commits and rebase-merge**
+      (Settings → General → Pull Requests). This is a setting, not a
+      convention: `CONTRIBUTING.md` tells contributors their PR title
+      becomes the commit subject, which is only true if squash is the
+      only option available.
 - [ ] Enable **private vulnerability reporting** (Settings → Security).
       `SECURITY.md` tells reporters to use it; without it enabled that
       instruction is a dead end.
