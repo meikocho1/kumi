@@ -1,0 +1,44 @@
+name: Feature request
+description: Propose something Kumi should be able to do.
+labels: [enhancement]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Kumi has a few deliberate constraints — it compiles to real,
+        inspectable Ash resources and never hides Ash, it targets
+        Ash/AshPostgres only, and the shorthand DSL intentionally omits
+        anything it cannot round-trip through `mix kumi.expand`. Proposals
+        that cross one of those are still welcome; they just need to say so
+        up front so the discussion is about the constraint, not the diff.
+        See the README for what each one means.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: |
+        What are you trying to build, and where does Kumi make you write
+        glue code or drop out of it entirely? Describe the situation, not
+        the feature.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you'd like it to do
+      description: If you have a DSL or API shape in mind, sketch it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do today instead
+      description: |
+        The workaround, even if it's ugly. This is often the most useful
+        part of the issue — it shows the real cost of not having this.
+    validations:
+      required: false

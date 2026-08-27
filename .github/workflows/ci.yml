@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A new push to a PR cancels the previous run for that PR. Runs on `main`
+# are keyed by SHA instead, so nothing already merged gets cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.package }}
+    runs-on: ubuntu-24.04
+
+    strategy:
+      # One package failing must not hide the state of the other three —
+      # a contributor should see every result from a single run.
+      fail-fast: false
+      matrix:
+        package: [kumi, kumi_admin, kumi_new, kumi_storage]
+
+    # Only `kumi`'s suite needs Postgres (its `test` alias runs
+    # `ash.setup`); the other three are pure unit tests. Matrix `services`
+    # can't be made conditional, and an idle Postgres costs a few seconds,
+    # so it runs for every job rather than splitting the matrix in two.
+    #
+    # Port 5434 on the host side is deliberate: it is what
+    # `kumi/config/test.exs` already points at, so no config in this repo
+    # needs a CI-only branch.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5434:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    defaults:
+      run:
+        working-directory: ${{ matrix.package }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # `.tool-versions` at the repo root is the single source of truth for
+      # the toolchain — contributors' asdf/mise and CI read the same file.
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ${{ matrix.package }}/deps
+            ${{ matrix.package }}/_build
+          # `.tool-versions` is part of the key because `_build` is not
+          # portable across Elixir/OTP versions — a toolchain bump has to
+          # bust the cache. `kumi_new` has no `mix.lock` (no dependencies),
+          # so its hash is empty and the toolchain alone keys it.
+          key: mix-${{ matrix.package }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles(format('{0}/mix.lock', matrix.package)) }}
+          restore-keys: mix-${{ matrix.package }}-${{ hashFiles('.tool-versions') }}-
+
+      - run: mix deps.get
+
+      # Compile BEFORE the format check: `.formatter.exs` imports Spark's
+      # DSL formatter plugins, which have to be compiled before
+      # `mix format` can load them. Checking format first fails on a cold
+      # cache with a confusing error.
+      - run: mix compile --warnings-as-errors
+
+      - run: mix format --check-formatted
+
+      - run: mix test

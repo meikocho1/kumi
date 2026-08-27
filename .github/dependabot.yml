@@ -1,0 +1,29 @@
+version: 2
+
+updates:
+  # One entry per package: this is a monorepo of four independent mix
+  # projects, and Dependabot scopes an ecosystem to a single manifest
+  # directory. `kumi_new` has no runtime deps by design (it has to stay
+  # installable as a mix archive), so it is not listed.
+  - package-ecosystem: mix
+    directory: /kumi
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: mix
+    directory: /kumi_admin
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: mix
+    directory: /kumi_storage
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

@@ -1,0 +1,67 @@
+name: Bug report
+description: Something in Kumi behaves differently from what it documents.
+labels: [bug]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please include the exact commands and output. Kumi inspects live
+        Postgres schemas and generates code, so "it didn't work" is very
+        hard to act on without the real text.
+
+  - type: dropdown
+    id: package
+    attributes:
+      label: Package
+      options:
+        - kumi (plan/apply, App & Resource DSL, mix tasks)
+        - kumi_admin (LiveView admin)
+        - kumi_new (mix kumi.new generator)
+        - kumi_storage (uploads)
+        - Not sure
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected to happen
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What actually happened
+      description: Paste the full error or output, not a summary of it.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: |
+        The smallest thing that shows the problem. A resource definition
+        plus the command you ran is usually enough. If it involves schema
+        drift, include the `mix kumi.plan --verbose` output.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions
+      description: |
+        Output of `elixir --version`, plus the relevant lines from your
+        `mix.lock` (ash, ash_postgres, spark, igniter, phoenix,
+        phoenix_live_view) and your Postgres version.
+      render: shell
+    validations:
+      required: true

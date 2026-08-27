@@ -3,3 +3,6 @@
 # spike apps are their own git repos
 spikes/spike0_crm/
 spikes/chat_ops/
+
+# browser-automation scratch output
+.playwright-mcp/
