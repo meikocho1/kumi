@@ -8,6 +8,16 @@ defmodule Kumi.Test.Deal do
   postgres do
     table "kumi_test_deals"
     repo Kumi.Test.Repo
+
+    # M2 regression coverage: a `custom_indexes` block (not an `identities`
+    # unique constraint) exercises Kumi.Desired.custom_indexes/2. No
+    # explicit `name:` here on purpose, to also exercise the default-naming
+    # path (AshPostgres.CustomIndex.name/2). `amount`, not `stage`, so
+    # dropping `stage` in Kumi.ApplyTest doesn't also cascade-drop this
+    # index and change that (unrelated) test's expected op count.
+    custom_indexes do
+      index [:amount]
+    end
   end
 
   actions do

@@ -28,19 +28,30 @@ defmodule KumiAdmin.FormFields do
 
   @type field :: %{attribute: Ash.Resource.Attribute.t(), widget: widget()}
 
-  @doc "Fields for `resource`'s primary `:create` or `:update` action."
-  @spec for_action(module(), :create | :update) :: [field()]
+  @doc """
+  Fields for `resource`'s primary `:create` or `:update` action, or `nil`
+  if the resource has no primary action of that type (e.g. a read-only
+  resource). Uses the non-bang `Ash.Resource.Info.primary_action/2` so a
+  missing action degrades to `nil` instead of raising — the caller
+  (`ResourceFormLive`) turns that into an honest error state (M6).
+  """
+  @spec for_action(module(), :create | :update) :: [field()] | nil
   def for_action(resource, type) when type in [:create, :update] do
-    action = Ash.Resource.Info.primary_action!(resource, type)
-    accepted = MapSet.new(action.accept)
-    belongs_to = belongs_to_by_source_attribute(resource)
+    case Ash.Resource.Info.primary_action(resource, type) do
+      nil ->
+        nil
 
-    resource
-    |> Ash.Resource.Info.public_attributes()
-    |> Enum.filter(&MapSet.member?(accepted, &1.name))
-    |> Enum.map(fn attribute ->
-      %{attribute: attribute, widget: widget(attribute, belongs_to[attribute.name])}
-    end)
+      action ->
+        accepted = MapSet.new(action.accept)
+        belongs_to = belongs_to_by_source_attribute(resource)
+
+        resource
+        |> Ash.Resource.Info.public_attributes()
+        |> Enum.filter(&MapSet.member?(accepted, &1.name))
+        |> Enum.map(fn attribute ->
+          %{attribute: attribute, widget: widget(attribute, belongs_to[attribute.name])}
+        end)
+    end
   end
 
   defp belongs_to_by_source_attribute(resource) do

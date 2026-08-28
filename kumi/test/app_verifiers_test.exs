@@ -42,6 +42,88 @@ defmodule Kumi.AppVerifiersTest do
     end
   end
 
+  test "rejects an app with no `app do ... end` block (name unset)" do
+    assert_dsl_error(%Spark.Error.DslError{path: [:app, :name]}) do
+      defmodule Elixir.Kumi.AppVerifiersTest.NoAppBlock do
+        use Kumi.App
+
+        resources do
+          resource Kumi.Test.Account
+        end
+      end
+    end
+  end
+
+  test "rejects a resource whose primary key isn't exactly [:id]" do
+    defmodule Elixir.Kumi.AppVerifiersTest.CustomPrimaryKeyResource do
+      @moduledoc false
+      use Ash.Resource, data_layer: :embedded
+
+      attributes do
+        attribute :key, :string do
+          primary_key? true
+          allow_nil? false
+          public? true
+        end
+      end
+    end
+
+    assert_dsl_error(%Spark.Error.DslError{path: [:resources, :resource]}) do
+      defmodule Elixir.Kumi.AppVerifiersTest.CustomPrimaryKeyApp do
+        use Kumi.App
+
+        app do
+          name :ok
+        end
+
+        resources do
+          resource Kumi.AppVerifiersTest.CustomPrimaryKeyResource
+        end
+      end
+    end
+  end
+
+  test "rejects duplicate navigation entries" do
+    assert_dsl_error(%Spark.Error.DslError{path: [:admin, :navigation]}) do
+      defmodule Elixir.Kumi.AppVerifiersTest.DuplicateNavigation do
+        use Kumi.App
+
+        app do
+          name :ok
+        end
+
+        resources do
+          resource Kumi.Test.Account
+        end
+
+        admin do
+          navigation([Kumi.Test.Account, Kumi.Test.Account])
+        end
+      end
+    end
+  end
+
+  test "rejects duplicate metric names within one dashboard" do
+    assert_dsl_error(%Spark.Error.DslError{path: [:dashboards, :dashboard, :d]}) do
+      defmodule Elixir.Kumi.AppVerifiersTest.DuplicateMetricName do
+        use Kumi.App
+
+        app do
+          name :ok
+        end
+
+        resources do
+          resource Kumi.Test.Account
+        end
+
+        dashboard :d do
+          metric(:n, resource: Kumi.Test.Account)
+          metric(:n, resource: Kumi.Test.Account)
+        end
+      end
+    end
+  end
+
   test "rejects a navigation entry not declared in resources" do
     assert_dsl_error(%Spark.Error.DslError{path: [:admin, :navigation]}) do
       defmodule Elixir.Kumi.AppVerifiersTest.BadNavigation do
@@ -206,6 +288,48 @@ defmodule Kumi.AppVerifiersTest do
 
         dashboard :d do
           metric(:m, resource: Kumi.Test.Account, kind: :sum, field: :nonexistent)
+        end
+      end
+    end
+  end
+
+  test "accepts a :sum metric over a decimal field" do
+    refute_dsl_errors do
+      defmodule Elixir.Kumi.AppVerifiersTest.SumOnDecimalField do
+        use Kumi.App
+
+        app do
+          name :ok
+        end
+
+        resources do
+          resource Kumi.Test.Deal
+        end
+
+        dashboard :d do
+          metric(:pipeline_value, resource: Kumi.Test.Deal, kind: :sum, field: :amount)
+        end
+      end
+    end
+  end
+
+  test "rejects a :sum metric whose field is not a numeric type" do
+    assert_dsl_error(%Spark.Error.DslError{path: [:dashboards, :dashboard, :d]}) do
+      defmodule Elixir.Kumi.AppVerifiersTest.SumOnNonNumericField do
+        use Kumi.App
+
+        app do
+          name :ok
+        end
+
+        resources do
+          resource Kumi.Test.Account
+        end
+
+        dashboard :d do
+          # :name is a :string attribute — Ash.sum/3 would compile here and
+          # only fail at request time, inside the admin dashboard.
+          metric(:m, resource: Kumi.Test.Account, kind: :sum, field: :name)
         end
       end
     end

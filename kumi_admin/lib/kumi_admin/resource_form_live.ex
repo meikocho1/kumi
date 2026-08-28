@@ -46,6 +46,15 @@ defmodule KumiAdmin.ResourceFormLive do
     {:noreply, assign(socket, form: AshPhoenix.Form.validate(socket.assigns.form, params))}
   end
 
+  # LiveView events come from the client, not from the rendered DOM — an
+  # authenticated user can push "save" over the socket while the page is
+  # in its not-found/forbidden/no-action state (`form` is nil), even
+  # though the Save button isn't rendered there. Guard it rather than let
+  # `AshPhoenix.Form.submit(nil, ...)` crash the process (L5).
+  def handle_event("save", _params, %{assigns: %{form: nil}} = socket) do
+    {:noreply, put_flash(socket, :error, "You don't have permission to do that.")}
+  end
+
   def handle_event("save", %{"form" => params}, socket) do
     case apply_uploads(socket, params) do
       {:ok, params} ->
@@ -166,20 +175,31 @@ defmodule KumiAdmin.ResourceFormLive do
     end
   end
 
+  # `Ash.Resource.Info.primary_action/2` (non-bang) — a resource with no
+  # primary create/update action (e.g. `actions do defaults [:read] end`)
+  # degrades to the `:no_action` state instead of letting the bang variant
+  # raise and crash the route (M6). `Capability.can_create?/2` already
+  # hides the New/Edit buttons for this case; this makes the route itself
+  # honest when reached directly.
   defp new_form(socket, resource) do
-    actor = socket.assigns.actor
-    action = Ash.Resource.Info.primary_action!(resource, :create).name
-    fields = KumiAdmin.FormFields.for_action(resource, :create)
-    form = AshPhoenix.Form.for_create(resource, action, actor: actor) |> to_form()
+    case Ash.Resource.Info.primary_action(resource, :create) do
+      nil ->
+        no_action_state(socket)
 
-    assign(socket,
-      error: nil,
-      mode: :new,
-      fields: fields,
-      form: form,
-      record: nil,
-      belongs_to_options: belongs_to_options(fields, actor)
-    )
+      action ->
+        actor = socket.assigns.actor
+        fields = KumiAdmin.FormFields.for_action(resource, :create)
+        form = AshPhoenix.Form.for_create(resource, action.name, actor: actor) |> to_form()
+
+        assign(socket,
+          error: nil,
+          mode: :new,
+          fields: fields,
+          form: form,
+          record: nil,
+          belongs_to_options: belongs_to_options(fields, actor, nil)
+        )
+    end
   end
 
   defp edit_form(socket, resource, id) do
@@ -187,30 +207,66 @@ defmodule KumiAdmin.ResourceFormLive do
 
     case Ash.get(resource, id, actor: actor) do
       {:ok, record} ->
-        action = Ash.Resource.Info.primary_action!(resource, :update).name
-        fields = KumiAdmin.FormFields.for_action(resource, :update)
-        record = load_upload_relationships(record, fields, actor)
-        form = AshPhoenix.Form.for_update(record, action, actor: actor) |> to_form()
+        case Ash.Resource.Info.primary_action(resource, :update) do
+          nil ->
+            no_action_state(socket)
 
-        assign(socket,
-          error: nil,
-          mode: :edit,
-          fields: fields,
-          form: form,
-          record: record,
-          belongs_to_options: belongs_to_options(fields, actor)
-        )
+          action ->
+            fields = KumiAdmin.FormFields.for_action(resource, :update)
+            record = load_upload_relationships(record, fields, actor)
+            form = AshPhoenix.Form.for_update(record, action.name, actor: actor) |> to_form()
 
-      {:error, _reason} ->
-        assign(socket,
-          error: :forbidden,
-          mode: nil,
-          fields: [],
-          form: nil,
-          record: nil,
-          belongs_to_options: %{}
-        )
+            assign(socket,
+              error: nil,
+              mode: :edit,
+              fields: fields,
+              form: form,
+              record: record,
+              belongs_to_options: belongs_to_options(fields, actor, record)
+            )
+        end
+
+      # A record hidden by a filter-based read policy (the default) never
+      # raises Forbidden — Ash reports it the same way as a genuinely
+      # missing id: `Ash.Error.Invalid` wrapping `Ash.Error.Query.NotFound`
+      # (see `Ash.get/3`). Folding that into the same honest state as a
+      # real policy Forbidden is deliberate, not a gap: telling the two
+      # apart would let a user probe which ids exist (M3/M4).
+      {:error, %Ash.Error.Forbidden{}} ->
+        forbidden_state(socket)
+
+      {:error, %Ash.Error.Invalid{errors: errors} = error} ->
+        if Enum.any?(errors, &match?(%Ash.Error.Query.NotFound{}, &1)) do
+          forbidden_state(socket)
+        else
+          raise error
+        end
+
+      {:error, error} ->
+        raise error
     end
+  end
+
+  defp no_action_state(socket) do
+    assign(socket,
+      error: :no_action,
+      mode: nil,
+      fields: [],
+      form: nil,
+      record: nil,
+      belongs_to_options: %{}
+    )
+  end
+
+  defp forbidden_state(socket) do
+    assign(socket,
+      error: :forbidden,
+      mode: nil,
+      fields: [],
+      form: nil,
+      record: nil,
+      belongs_to_options: %{}
+    )
   end
 
   # Preloads each upload field's belongs_to so the form can show a "current
@@ -233,18 +289,49 @@ defmodule KumiAdmin.ResourceFormLive do
     end
   end
 
-  defp belongs_to_options(fields, actor) do
+  # `record` is `nil` on create (there is no current value to preserve).
+  # On edit, the record's current foreign-key value is always included as
+  # an option — even when it falls outside the 100-row window or the
+  # options read fails outright — so saving after touching an unrelated
+  # field can never blank a value the user didn't touch (M5).
+  @doc false
+  def belongs_to_options(fields, actor, record) do
     fields
     |> Enum.filter(&match?({:belongs_to, _}, &1.widget))
     |> Map.new(fn %{attribute: attribute, widget: {:belongs_to, relationship}} ->
-      {attribute.name, load_options(relationship.destination, actor)}
+      current_id = record && Map.get(record, attribute.name)
+      options = load_options(relationship.destination, actor)
+      {attribute.name, ensure_current_option(options, current_id, relationship, actor)}
     end)
   end
 
+  # ponytail: 100-row window, no search/pagination. Fine for a picklist;
+  # once a `belongs_to` destination regularly exceeds ~100 rows this needs
+  # a searchable/paginated picker instead of a plain `<select>`.
   defp load_options(destination, actor) do
-    case Ash.read(Ash.Query.limit(destination, 100), actor: actor) do
+    case destination |> Ash.Query.sort(:id) |> Ash.Query.limit(100) |> Ash.read(actor: actor) do
       {:ok, records} -> Enum.map(records, &{KumiAdmin.Format.record_label(&1), &1.id})
       {:error, _reason} -> []
+    end
+  end
+
+  defp ensure_current_option(options, nil, _relationship, _actor), do: options
+
+  defp ensure_current_option(options, current_id, relationship, actor) do
+    if Enum.any?(options, fn {_label, id} -> id == current_id end) do
+      options
+    else
+      [{current_option_label(relationship.destination, current_id, actor), current_id} | options]
+    end
+  end
+
+  # Best-effort label for a current value outside the window — falls back
+  # to the truncated id (same heuristic as `Format.record_label/1`) rather
+  # than failing the whole form when the individual lookup errors.
+  defp current_option_label(destination, id, actor) do
+    case Ash.get(destination, id, actor: actor) do
+      {:ok, record} -> KumiAdmin.Format.record_label(record)
+      {:error, _reason} -> KumiAdmin.Format.truncate_id(id)
     end
   end
 
@@ -295,11 +382,17 @@ defmodule KumiAdmin.ResourceFormLive do
 
   attr :field, Phoenix.HTML.FormField, required: true
   attr :widget, :any, required: true
+  attr :attribute, :any, required: true
   attr :options, :list, default: []
   attr :upload, :any, default: nil
   attr :current_url, :any, default: nil
 
-  defp field_input(assigns) do
+  # Public (not private) so `belongs_to`/select rendering — including the
+  # blank-option omission — is directly unit-testable via
+  # `Phoenix.LiveViewTest.render_component/2` (M5), without mounting a
+  # LiveView.
+  @doc false
+  def field_input(assigns) do
     ~H"""
     <input
       :if={@widget == :text}
@@ -351,7 +444,7 @@ defmodule KumiAdmin.ResourceFormLive do
       class="kumi-admin-input"
     />
     <select :if={select?(@widget)} id={@field.id} name={@field.name} class="kumi-admin-input">
-      <option value=""></option>
+      <option :if={@attribute.allow_nil?} value=""></option>
       <option
         :for={{label, value} <- select_options(@widget, @options)}
         value={value}
@@ -401,6 +494,10 @@ defmodule KumiAdmin.ResourceFormLive do
         No access or no record.
       </p>
 
+      <p :if={@error == :no_action} class="kumi-admin-empty">
+        This resource doesn't support that action.
+      </p>
+
       <.form
         :if={is_nil(@error)}
         for={@form}
@@ -415,6 +512,7 @@ defmodule KumiAdmin.ResourceFormLive do
           <.field_input
             field={@form[field.attribute.name]}
             widget={field.widget}
+            attribute={field.attribute}
             options={Map.get(@belongs_to_options, field.attribute.name, [])}
             upload={upload_config(Map.get(assigns, :uploads, %{}), field.widget)}
             current_url={current_attachment_url(@record, field.widget)}

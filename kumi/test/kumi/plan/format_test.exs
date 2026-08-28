@@ -47,7 +47,7 @@ defmodule Kumi.Plan.FormatTest do
     without_hints = Format.format(ops)
 
     assert with_hints =~ "\n      fix: mix ash.codegen"
-    assert with_hints =~ "ALTER TABLE crm_accounts ADD COLUMN email text NOT NULL;"
+    assert with_hints =~ ~s(ALTER TABLE "crm_accounts" ADD COLUMN "email" text NOT NULL;)
     refute without_hints =~ "fix:"
   end
 
@@ -76,5 +76,39 @@ defmodule Kumi.Plan.FormatTest do
 
     assert output =~ "finding: 3 rows contain data that would be lost"
     assert finding_index == op_index + 1
+  end
+
+  test "H3: change_primary_key/change_fk/change_index render end-to-end (format_op, classify, fix hints) without crashing" do
+    alias Kumi.Schema.{ForeignKey, Index}
+
+    pk_op = {:change_primary_key, "t", ["id"], []}
+
+    fk_op =
+      {:change_fk, "t",
+       %ForeignKey{
+         name: "fk",
+         column: "account_id",
+         references_table: "b",
+         references_column: "id"
+       },
+       %ForeignKey{
+         name: "fk",
+         column: "account_id",
+         references_table: "c",
+         references_column: "id"
+       }}
+
+    idx_op =
+      {:change_index, "t", %Index{name: "idx", columns: ["a"], unique: true},
+       %Index{name: "idx", columns: ["b"], unique: false}}
+
+    output = Format.format([pk_op, fk_op, idx_op], verbose: true, fix_hints: true)
+
+    assert output =~ "primary key"
+    assert output =~ "fk account_id"
+    assert output =~ "index idx"
+    assert output =~ "[REVIEW:"
+    assert output =~ "fix: mix ash.codegen"
+    assert output =~ "0 safe / 3 review / 0 dangerous"
   end
 end

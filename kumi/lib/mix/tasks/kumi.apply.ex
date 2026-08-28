@@ -48,19 +48,24 @@ defmodule Mix.Tasks.Kumi.Apply do
 
     Mix.shell().info(format_preview(to_execute, to_skip))
 
-    if to_execute == [] do
-      Mix.shell().info("nothing to execute — mix kumi.apply is a no-op here")
-    else
-      if opts[:yes] || Mix.shell().yes?("Execute #{length(to_execute)} statement(s) above?") do
+    cond do
+      to_execute == [] ->
+        # Nothing ran, so nothing was verified either — say so explicitly
+        # rather than letting a reader assume the missing line means "ok".
+        Mix.shell().info(
+          "nothing to execute — mix kumi.apply is a no-op here (verified: not_run)"
+        )
+
+      opts[:yes] || Mix.shell().yes?("Execute #{length(to_execute)} statement(s) above?") ->
         result = Kumi.Apply.run(repo, plan, domains: domains)
 
         Mix.shell().info(
           "\nexecuted #{length(result.executed)} / skipped #{length(result.skipped)} — " <>
             "verified: #{result.verified}"
         )
-      else
+
+      true ->
         Mix.shell().info("aborted — nothing executed")
-      end
     end
   end
 

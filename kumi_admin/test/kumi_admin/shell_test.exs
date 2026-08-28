@@ -30,6 +30,12 @@ defmodule KumiAdmin.ShellTest do
     assert html =~ "display: flex"
     refute html =~ "{css()}"
     assert html =~ "body-content"
+
+    # This substring contains literal double quotes. HTML-escaping (i.e.
+    # dropping `Phoenix.HTML.raw/1` around `css()`) would turn them into
+    # `&quot;`, which the two assertions above can't detect — the rest of
+    # this CSS has no `<`, `>`, or `&` characters for escaping to alter.
+    assert html =~ ~s(font-family: system-ui, -apple-system, "Segoe UI", sans-serif;)
   end
 
   test "footer carries the Kumi mark and attribution" do

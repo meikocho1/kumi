@@ -13,10 +13,13 @@ defmodule Kumi.Diff do
           | {:add_column, String.t(), Kumi.Schema.Column.t()}
           | {:remove_column, String.t(), Kumi.Schema.Column.t()}
           | {:change_column, String.t(), Kumi.Schema.Column.t(), [{atom(), term(), term()}]}
+          | {:change_primary_key, String.t(), [String.t()], [String.t()]}
           | {:add_fk, String.t(), Kumi.Schema.ForeignKey.t()}
           | {:remove_fk, String.t(), Kumi.Schema.ForeignKey.t()}
+          | {:change_fk, String.t(), Kumi.Schema.ForeignKey.t(), Kumi.Schema.ForeignKey.t()}
           | {:add_index, String.t(), Kumi.Schema.Index.t()}
           | {:remove_index, String.t(), Kumi.Schema.Index.t()}
+          | {:change_index, String.t(), Kumi.Schema.Index.t(), Kumi.Schema.Index.t()}
 
   @spec diff([Table.t()], [Table.t()]) :: [op()]
   def diff(desired, actual) do
@@ -44,10 +47,20 @@ defmodule Kumi.Diff do
   end
 
   defp diff_table(%Table{name: table} = desired, %Table{} = actual) do
-    diff_columns(table, desired.columns, actual.columns) ++
+    diff_primary_key(table, desired.primary_key, actual.primary_key) ++
+      diff_columns(table, desired.columns, actual.columns) ++
       diff_fks(table, desired.foreign_keys, actual.foreign_keys) ++
       diff_indexes(table, desired.indexes, actual.indexes)
   end
+
+  # Primary key column ORDER is significant in Postgres (a composite PK's
+  # column order determines the underlying btree's leading column, which
+  # affects which queries it can serve) — compared as ordered lists, not
+  # sets, unlike the name-keyed comparisons below.
+  defp diff_primary_key(_table, same, same), do: []
+
+  defp diff_primary_key(table, desired_pk, actual_pk),
+    do: [{:change_primary_key, table, desired_pk, actual_pk}]
 
   defp diff_columns(table, desired_cols, actual_cols) do
     desired_by_name = index_by(desired_cols, & &1.name)
@@ -100,8 +113,20 @@ defmodule Kumi.Diff do
           not Map.has_key?(desired_by_col, col),
           do: {:remove_fk, table, fk}
 
-    adds ++ removes
+    changes =
+      for {col, desired_fk} <- desired_by_col,
+          actual_fk = actual_by_col[col],
+          not is_nil(actual_fk),
+          fk_target_changed?(desired_fk, actual_fk),
+          do: {:change_fk, table, desired_fk, actual_fk}
+
+    adds ++ removes ++ changes
   end
+
+  defp fk_target_changed?(desired, actual),
+    do:
+      desired.references_table != actual.references_table or
+        desired.references_column != actual.references_column
 
   defp diff_indexes(table, desired_indexes, actual_indexes) do
     desired_by_name = index_by(desired_indexes, & &1.name)
@@ -117,8 +142,18 @@ defmodule Kumi.Diff do
           not Map.has_key?(desired_by_name, name),
           do: {:remove_index, table, idx}
 
-    adds ++ removes
+    changes =
+      for {name, desired_idx} <- desired_by_name,
+          actual_idx = actual_by_name[name],
+          not is_nil(actual_idx),
+          index_definition_changed?(desired_idx, actual_idx),
+          do: {:change_index, table, desired_idx, actual_idx}
+
+    adds ++ removes ++ changes
   end
+
+  defp index_definition_changed?(desired, actual),
+    do: desired.columns != actual.columns or desired.unique != actual.unique
 
   defp index_by(list, fun), do: Map.new(list, fn item -> {fun.(item), item} end)
 end

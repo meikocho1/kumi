@@ -2,9 +2,9 @@ defmodule Kumi.Resource.Codegen do
   @moduledoc """
   Pure function: `Kumi.Resource.FieldSpec.t()` list + `use Kumi.Resource`
   opts → the Ash resource source text. This is the single source of truth
-  for the shorthand's expansion — both `Kumi.Resource.__before_compile__/1`
-  (what actually gets compiled) and `mix kumi.expand` (what gets printed)
-  call this same function, so they can never drift apart.
+  for the shorthand's expansion — both `Kumi.Resource.fields/1` (what
+  actually gets compiled) and `mix kumi.expand` (what gets printed) call
+  this same function, so they can never drift apart.
   """
 
   alias Kumi.Resource.FieldSpec
@@ -12,6 +12,53 @@ defmodule Kumi.Resource.Codegen do
   # Deliberately simple — "reasonable", not RFC 5322-exhaustive. Good enough
   # to catch "not-an-email" while accepting ordinary addresses.
   @email_regex_source "~r/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/"
+
+  # Mirrors the fixed attributes/actions `generate/3`'s template always
+  # emits (`uuid_primary_key :id`, `timestamps()`, the default action set)
+  # — kept alongside `emitted_members/1` since that's the only other place
+  # that needs to know the same fixed list.
+  @default_attribute_names [:id, :inserted_at, :updated_at]
+  @default_action_names [:read, :destroy, :create, :update]
+
+  @typedoc "Names of attributes/relationships/actions the generated source declares."
+  @type emitted_members :: %{
+          attributes: [atom()],
+          relationships: [atom()],
+          actions: [atom()]
+        }
+
+  @doc """
+  The attribute/relationship/action names `generate/3` actually emits for
+  these field specs. Used by `Kumi.Resource`'s `@after_verify` check (H1
+  fix, blueprint §0 D1) to catch plain Ash DSL sections (`attributes do
+  ... end`, a second `relationships do ... end`, `calculations`,
+  `aggregates`, `identities`) declared alongside `fields do ... end` —
+  those compile into the resource but `mix kumi.expand` would never print
+  them, silently breaking "expand always prints exactly what compiles".
+  """
+  @spec emitted_members([FieldSpec.t()]) :: emitted_members()
+  def emitted_members(field_specs) do
+    field_names = for %FieldSpec{kind: :field, name: name} <- field_specs, do: name
+
+    # `belongs_to :name, Dest` implicitly generates a `:name_id` foreign
+    # key *attribute* (Ash's default `source_attribute`, see
+    # `Ash.Resource.Relationships.BelongsTo`) — that attribute is still
+    # something `fields do ... end` generated, just indirectly, so it must
+    # be counted as expected, not flagged as extra.
+    belongs_to_fk_names =
+      for %FieldSpec{kind: :belongs_to, name: name} <- field_specs, do: :"#{name}_id"
+
+    relationship_names =
+      for %FieldSpec{kind: kind, name: name} <- field_specs, kind in [:belongs_to, :has_many] do
+        name
+      end
+
+    %{
+      attributes: @default_attribute_names ++ field_names ++ belongs_to_fk_names,
+      relationships: relationship_names,
+      actions: @default_action_names
+    }
+  end
 
   @spec generate(module(), keyword(), [FieldSpec.t()]) :: String.t()
   def generate(module, opts, field_specs) do
@@ -110,10 +157,17 @@ defmodule Kumi.Resource.Codegen do
     """
   end
 
-  defp belongs_to_source(%FieldSpec{name: name, type: dest}) do
+  defp belongs_to_source(%FieldSpec{name: name, type: dest, opts: opts}) do
+    lines =
+      [
+        if(Keyword.get(opts, :required, false), do: "allow_nil? false"),
+        "public? true"
+      ]
+      |> Enum.filter(& &1)
+
     """
     belongs_to #{inspect(name)}, #{inspect(dest)} do
-      public? true
+      #{Enum.join(lines, "\n")}
     end
     """
   end

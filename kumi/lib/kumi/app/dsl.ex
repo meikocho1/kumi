@@ -172,7 +172,9 @@ defmodule Kumi.App.Dsl do
   @sections [@app, @resources, @admin, @workflows, @dashboards]
 
   @verifiers [
+    Kumi.App.Verifiers.ValidateAppName,
     Kumi.App.Verifiers.ValidateResources,
+    Kumi.App.Verifiers.ValidatePrimaryKey,
     Kumi.App.Verifiers.ValidateNavigation,
     Kumi.App.Verifiers.ValidateWorkflowStages,
     Kumi.App.Verifiers.ValidateDashboardMetrics,

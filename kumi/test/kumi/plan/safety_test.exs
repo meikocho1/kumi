@@ -123,5 +123,47 @@ defmodule Kumi.Plan.SafetyTest do
       assert reason =~ "narrows"
       assert reason =~ "does not fail"
     end
+
+    test "change_column: a nil-sided datetime_precision change ARRIVING ALONE fails closed to review (H5)" do
+      # This is the catch-all clause's own reason to exist: a nil-sided
+      # precision change with NO accompanying :type change in the same
+      # list (e.g. a PgType mapping gap like H4's :date bug) must not be
+      # waved through as :safe just because that is the common case.
+      col = %Column{name: "born_on", type: "date", nullable: true}
+
+      assert {:review, reason} =
+               Safety.classify({:change_column, "t", col, [{:datetime_precision, nil, 0}]})
+
+      refute reason =~ "accompanying type change"
+
+      assert {:review, _} =
+               Safety.classify({:change_column, "t", col, [{:datetime_precision, 0, nil}]})
+    end
+
+    test "change_primary_key is review, mentioning both column lists" do
+      assert {:review, reason} = Safety.classify({:change_primary_key, "t", ["id"], []})
+      assert reason =~ "[]"
+      assert reason =~ "[\"id\"]"
+    end
+
+    test "change_fk is review, mentioning both targets" do
+      desired_fk = @fk
+      actual_fk = %{@fk | references_table: "legacy_accounts"}
+
+      assert {:review, reason} = Safety.classify({:change_fk, "t", desired_fk, actual_fk})
+      assert reason =~ "legacy_accounts"
+      assert reason =~ "a.id"
+    end
+
+    test "change_index is review, mentioning both definitions" do
+      desired_idx = %Index{name: "idx", columns: ["email"], unique: true}
+      actual_idx = %Index{name: "idx", columns: ["username"], unique: false}
+
+      assert {:review, reason} = Safety.classify({:change_index, "t", desired_idx, actual_idx})
+      assert reason =~ "email"
+      assert reason =~ "username"
+      assert reason =~ "true"
+      assert reason =~ "false"
+    end
   end
 end

@@ -10,7 +10,7 @@ defmodule Kumi.Plan.FixHintTest do
       [codegen, fallback] = FixHint.lines({:add_column, "crm_accounts", col})
 
       assert codegen =~ "mix ash.codegen"
-      assert fallback =~ "ALTER TABLE crm_accounts ADD COLUMN email text NOT NULL;"
+      assert fallback =~ ~s(ALTER TABLE "crm_accounts" ADD COLUMN "email" text NOT NULL;)
     end
 
     test "add_table has no reconstructed DDL — recreate by hand" do
@@ -35,10 +35,11 @@ defmodule Kumi.Plan.FixHintTest do
       [_, idx_sql] = FixHint.lines({:add_index, "crm_accounts", idx})
 
       assert fk_sql =~
-               "ALTER TABLE crm_deals ADD CONSTRAINT crm_deals_account_id_fkey " <>
-                 "FOREIGN KEY (account_id) REFERENCES crm_accounts (id);"
+               ~s(ALTER TABLE "crm_deals" ADD CONSTRAINT "crm_deals_account_id_fkey" ) <>
+                 ~s{FOREIGN KEY ("account_id") REFERENCES "crm_accounts" ("id");}
 
-      assert idx_sql =~ "CREATE UNIQUE INDEX crm_accounts_email_index ON crm_accounts (email);"
+      assert idx_sql =~
+               ~s{CREATE UNIQUE INDEX "crm_accounts_email_index" ON "crm_accounts" ("email");}
     end
   end
 
@@ -47,14 +48,14 @@ defmodule Kumi.Plan.FixHintTest do
       col = %Column{name: "email", type: "text", nullable: false, default: nil}
       [_, sql] = FixHint.lines({:change_column, "t", col, [{:nullable, false, true}]})
 
-      assert sql =~ "ALTER TABLE t ALTER COLUMN email SET NOT NULL;"
+      assert sql =~ ~s(ALTER TABLE "t" ALTER COLUMN "email" SET NOT NULL;)
     end
 
     test "desired nullable: true becomes DROP NOT NULL" do
       col = %Column{name: "email", type: "text", nullable: true, default: nil}
       [_, sql] = FixHint.lines({:change_column, "t", col, [{:nullable, true, false}]})
 
-      assert sql =~ "ALTER TABLE t ALTER COLUMN email DROP NOT NULL;"
+      assert sql =~ ~s(ALTER TABLE "t" ALTER COLUMN "email" DROP NOT NULL;)
     end
 
     test "type change targets desired type; multiple actions join in one statement" do
@@ -66,7 +67,8 @@ defmodule Kumi.Plan.FixHintTest do
         )
 
       assert sql =~
-               "ALTER TABLE t ALTER COLUMN amount TYPE bigint, ALTER COLUMN amount SET NOT NULL;"
+               ~s(ALTER TABLE "t" ALTER COLUMN "amount" TYPE bigint, ) <>
+                 ~s(ALTER COLUMN "amount" SET NOT NULL;)
     end
 
     test "default-only change gets no SQL (normalized defaults are not SQL)" do
@@ -87,7 +89,7 @@ defmodule Kumi.Plan.FixHintTest do
 
       assert keep =~ "add the attribute to your Ash resource"
       assert keep =~ "cannot see this drift"
-      assert remove =~ "ALTER TABLE crm_accounts DROP COLUMN legacy_phone;"
+      assert remove =~ ~s(ALTER TABLE "crm_accounts" DROP COLUMN "legacy_phone";)
     end
 
     test "drop_table, remove_fk, remove_index each render their removal SQL" do
@@ -100,13 +102,63 @@ defmodule Kumi.Plan.FixHintTest do
 
       idx = %Index{name: "t_x_index", columns: ["x"], unique: false}
 
-      assert [_, "to remove it: DROP TABLE old_stuff;"] =
+      assert [_, ~s(to remove it: DROP TABLE "old_stuff";)] =
                FixHint.lines({:drop_table, %Table{name: "old_stuff"}})
 
-      assert [_, "to remove it: ALTER TABLE t DROP CONSTRAINT t_x_fkey;"] =
+      assert [_, ~s(to remove it: ALTER TABLE "t" DROP CONSTRAINT "t_x_fkey";)] =
                FixHint.lines({:remove_fk, "t", fk})
 
-      assert [_, "to remove it: DROP INDEX t_x_index;"] = FixHint.lines({:remove_index, "t", idx})
+      assert [_, ~s(to remove it: DROP INDEX "t_x_index";)] =
+               FixHint.lines({:remove_index, "t", idx})
+    end
+
+    test "drop_table's SQL comes from Kumi.Plan.SQL, not a hardcoded literal (L3)" do
+      # Regression for L3: this used to build "DROP TABLE #{table.name};" by
+      # hand instead of going through SQL.render/1 like every other
+      # destructive op — this test pins that the two can't diverge again by
+      # asserting the SQL module's own render call produces the same text.
+      table = %Table{name: "old_stuff"}
+      [_, hint_sql] = FixHint.lines({:drop_table, table})
+
+      assert {:ok, rendered} = Kumi.Plan.SQL.render({:drop_table, table})
+      assert hint_sql == "to remove it: " <> rendered
+    end
+  end
+
+  describe "H3: change_primary_key/change_fk/change_index get advisory prose, no literal SQL" do
+    test "change_primary_key names both column lists, no SQL" do
+      [codegen, fallback] = FixHint.lines({:change_primary_key, "t", ["id"], []})
+
+      assert codegen =~ "mix ash.codegen"
+      assert fallback =~ "[]"
+      assert fallback =~ "[\"id\"]"
+      refute fallback =~ "ALTER TABLE"
+    end
+
+    test "change_fk names both targets, no SQL" do
+      fk = %ForeignKey{
+        name: "t_a_fkey",
+        column: "account_id",
+        references_table: "accounts",
+        references_column: "id"
+      }
+
+      changed_fk = %{fk | references_table: "legacy_accounts"}
+      [_, fallback] = FixHint.lines({:change_fk, "t", fk, changed_fk})
+
+      assert fallback =~ "accounts.id"
+      assert fallback =~ "legacy_accounts.id"
+      refute fallback =~ "ALTER TABLE"
+    end
+
+    test "change_index names both definitions, no SQL" do
+      idx = %Index{name: "t_email_index", columns: ["email"], unique: true}
+      changed_idx = %{idx | columns: ["username"], unique: false}
+      [_, fallback] = FixHint.lines({:change_index, "t", idx, changed_idx})
+
+      assert fallback =~ "email"
+      assert fallback =~ "username"
+      refute fallback =~ ~s(INDEX "t_email_index" ON)
     end
   end
 
@@ -117,6 +169,6 @@ defmodule Kumi.Plan.FixHintTest do
 
     assert warn =~ "BEFORE ash.codegen"
     assert warn =~ "drop+add"
-    assert sql == "ALTER TABLE crm_accounts RENAME COLUMN phone TO phone_number;"
+    assert sql == ~s(ALTER TABLE "crm_accounts" RENAME COLUMN "phone" TO "phone_number";)
   end
 end

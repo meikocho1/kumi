@@ -13,6 +13,7 @@ defmodule Kumi.Desired do
   require Logger
 
   alias Ash.Resource.Relationships.BelongsTo
+  alias AshPostgres.CustomIndex
   alias Kumi.Desired.PgType
   alias Kumi.Schema.{Column, Default, ForeignKey, Index, Table}
 
@@ -78,9 +79,20 @@ defmodule Kumi.Desired do
     end)
   end
 
-  # Ash `identities` are the source of secondary unique indexes; AshPostgres
-  # names the underlying index "<table>_<identity name>_index" by default.
-  defp indexes(resource, table) do
+  # Two sources of secondary indexes, unioned: Ash `identities` (unique
+  # constraints) and AshPostgres's own `postgres do custom_indexes do ...
+  # end end` section (M2) — `Kumi.Actual` introspects EVERY non-PK index
+  # from pg_index, so a host that declares a custom_indexes entry, runs
+  # `mix ash.codegen` and migrates ends up with a DB matching its code
+  # exactly; without this union, Kumi would report that index as a
+  # `remove_index` (:review) forever, failing `mix kumi.plan --check` on
+  # correct code with no way to silence it.
+  defp indexes(resource, table),
+    do: identity_indexes(resource, table) ++ custom_indexes(resource, table)
+
+  # AshPostgres names the underlying index "<table>_<identity name>_index"
+  # by default.
+  defp identity_indexes(resource, table) do
     resource
     |> Ash.Resource.Info.identities()
     |> Enum.map(fn identity ->
@@ -88,6 +100,33 @@ defmodule Kumi.Desired do
         name: "#{table}_#{identity.name}_index",
         columns: Enum.map(identity.keys, &to_string/1),
         unique: true
+      }
+    end)
+  end
+
+  # Mirrors AshPostgres's own migration generator (deps/ash_postgres/lib/
+  # migration_generator/migration_generator.ex, `add_custom_index_name/2`):
+  # when a custom index has no explicit `name:`, the DDL name is computed
+  # as `AshPostgres.CustomIndex.name(table, index)` — an undocumented
+  # AshPostgres internal with no compatibility promise (this repo already
+  # treats such names as canaries, see the FK/identity naming above and the
+  # snapshot-format gotchas in CLAUDE.md). Calling the same function keeps
+  # Kumi's desired-side name identical to what actually got created.
+  #
+  # Only columns/uniqueness/name are represented on `Kumi.Schema.Index` —
+  # `where`, `using`, `include`, `nulls_distinct`, `concurrently` etc. (see
+  # `AshPostgres.CustomIndex`'s schema) have no field here and are
+  # INVISIBLE to the diff: a drift in one of those options alone would not
+  # be detected. Deliberately not expanding `%Index{}` to carry them in
+  # this pass — see the task notes / friction log for the tradeoff.
+  defp custom_indexes(resource, table) do
+    resource
+    |> AshPostgres.DataLayer.Info.custom_indexes()
+    |> Enum.map(fn index ->
+      %Index{
+        name: to_string(index.name || CustomIndex.name(table, index)),
+        columns: Enum.map(index.fields, &to_string(CustomIndex.column_name(&1))),
+        unique: index.unique
       }
     end)
   end

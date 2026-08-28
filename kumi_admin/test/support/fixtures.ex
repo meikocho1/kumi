@@ -9,6 +9,8 @@ defmodule KumiAdmin.Test.Domain do
     resource KumiAdmin.Test.Contact
     resource KumiAdmin.Test.Attachment
     resource KumiAdmin.Test.Person
+    resource KumiAdmin.Test.ReadOnly
+    resource KumiAdmin.Test.StrictContact
   end
 end
 
@@ -155,6 +157,52 @@ defmodule KumiAdmin.Test.Person do
 
   relationships do
     belongs_to :avatar, KumiAdmin.Test.Attachment, public?: true
+  end
+end
+
+defmodule KumiAdmin.Test.ReadOnly do
+  @moduledoc "Fixture Ash resource with only a `:read` action — exercises the honest-degrade path (M6) for a resource with no primary create/update action."
+
+  use Ash.Resource,
+    domain: KumiAdmin.Test.Domain,
+    data_layer: Ash.DataLayer.Ets
+
+  ets do
+    private? true
+  end
+
+  actions do
+    defaults [:read]
+  end
+
+  attributes do
+    uuid_primary_key :id
+    attribute :name, :string, public?: true
+  end
+end
+
+defmodule KumiAdmin.Test.StrictContact do
+  @moduledoc "Fixture Ash resource with a non-nullable `belongs_to` — exercises omitting the blank `<option>` for a required foreign key (M5)."
+
+  use Ash.Resource,
+    domain: KumiAdmin.Test.Domain,
+    data_layer: Ash.DataLayer.Ets
+
+  ets do
+    private? true
+  end
+
+  actions do
+    defaults [:read, :destroy, create: :*, update: :*]
+  end
+
+  attributes do
+    uuid_primary_key :id
+    attribute :name, :string, public?: true
+  end
+
+  relationships do
+    belongs_to :account, KumiAdmin.Test.Account, public?: true, allow_nil?: false
   end
 end
 

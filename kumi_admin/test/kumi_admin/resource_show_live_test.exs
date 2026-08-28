@@ -82,4 +82,33 @@ defmodule KumiAdmin.ResourceShowLiveTest do
 
     assert section.linkable? == false
   end
+
+  test "a non-Forbidden error is not swallowed into the forbidden state — it raises instead (M3)",
+       %{relationship: relationship} do
+    # Before this fix, ANY error (a DB outage, an invalid query, a cast
+    # failure) was reported to the user as "No access" — indistinguishable
+    # from a genuine policy denial. Only `Ash.Error.Forbidden` may map to
+    # the forbidden state; anything else is a bug and must surface loudly.
+    assert_raise Ash.Error.Invalid, fn ->
+      ResourceShowLive.build_has_many_section(
+        relationship,
+        [KumiAdmin.Test.Contact],
+        10,
+        {:error, %Ash.Error.Invalid{}}
+      )
+    end
+  end
+
+  describe "handle_event(\"delete\", ...) guard against a nil record (L5)" do
+    test "flashes the permission message instead of crashing when record is nil" do
+      socket = %Phoenix.LiveView.Socket{
+        assigns: %{__changed__: %{}, flash: %{}, record: nil}
+      }
+
+      {:noreply, socket} = ResourceShowLive.handle_event("delete", %{}, socket)
+
+      assert Phoenix.Flash.get(socket.assigns.flash, :error) ==
+               "You don't have permission to do that."
+    end
+  end
 end

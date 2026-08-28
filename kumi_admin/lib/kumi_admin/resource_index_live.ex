@@ -95,7 +95,12 @@ defmodule KumiAdmin.ResourceIndexLive do
               has_more?: length(results) > @page_size
             )
 
-          {:error, _reason} ->
+          # A list read can't 404 — a filter-based policy just yields
+          # `{:ok, []}` (see the "No records visible to you." branch
+          # below), never an error. So an error here is either a genuine
+          # policy Forbidden, or a bug (bad sort field, cast failure, DB
+          # outage); only the former is an honest "No access" (M3).
+          {:error, %Ash.Error.Forbidden{}} ->
             assign(socket,
               error: :forbidden,
               columns: columns,
@@ -103,6 +108,9 @@ defmodule KumiAdmin.ResourceIndexLive do
               records: [],
               has_more?: false
             )
+
+          {:error, error} ->
+            raise error
         end
     end
   end
@@ -198,8 +206,14 @@ defmodule KumiAdmin.ResourceIndexLive do
         No access or no records.
       </p>
 
+      <%!-- A filter-based read policy (the default) makes an unauthorized
+      read return `{:ok, []}`, not an error — this branch fires for both
+      a genuinely empty table AND a table the actor can't see into. The
+      wording is deliberately non-committal about which (M4): claiming
+      "the table is empty" would send an operator who owns nothing on a
+      tenant off to create duplicates. --%>
       <p :if={is_nil(@error) and @records == []} class="kumi-admin-empty">
-        No records yet.
+        No records visible to you.
       </p>
 
       <table :if={is_nil(@error) and @records != []} class="kumi-admin-table">

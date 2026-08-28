@@ -78,7 +78,13 @@ defmodule KumiAdmin.Components.Organisms do
     <Molecules.panel>
       <:header><Atoms.section_title text={KumiAdmin.Label.plural(@section.destination)} /></:header>
       <Atoms.empty :if={@section.error == :forbidden} text="No access." />
-      <Atoms.empty :if={@section.error == nil and @section.rows == []} text="No records yet." />
+      <%!-- Same non-committal wording as the top-level index page (M4): a
+      filter-based read policy makes an unauthorized child load look
+      identical to a genuinely empty relationship. --%>
+      <Atoms.empty
+        :if={@section.error == nil and @section.rows == []}
+        text="No records visible to you."
+      />
       <Molecules.data_table
         :if={@section.error == nil and @section.rows != []}
         columns={@section.columns}

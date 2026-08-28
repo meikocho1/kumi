@@ -48,4 +48,22 @@ defmodule Mix.Tasks.Kumi.ReportTest do
     assert report["verdict"] == "failed"
     assert exit_code == 1
   end
+
+  describe "truncate/1" do
+    # String.split("", "\n") returns [""], never [] — a failing step with
+    # truly empty captured output used to fall through to the `<= 20`
+    # branch and print an empty string as `detail` instead of the intended
+    # "(no output)" placeholder.
+    test "empty output produces the (no output) placeholder" do
+      assert Mix.Tasks.Kumi.Report.truncate("") == "(no output)"
+    end
+
+    test "whitespace-only output (post ANSI-strip) also counts as no output" do
+      assert Mix.Tasks.Kumi.Report.truncate("   \n  \n") == "(no output)"
+    end
+
+    test "non-empty output under the line cap passes through unchanged" do
+      assert Mix.Tasks.Kumi.Report.truncate("line one\nline two") == "line one\nline two"
+    end
+  end
 end

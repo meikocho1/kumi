@@ -63,10 +63,11 @@ defmodule Kumi.Apply do
 
   @type executed_entry :: {term(), String.t()}
   @type skipped_entry :: {term(), String.t()}
+  @type verified :: :not_run | :ok
   @type result :: %{
           executed: [executed_entry()],
           skipped: [skipped_entry()],
-          verified: boolean()
+          verified: verified()
         }
 
   @doc """
@@ -81,7 +82,7 @@ defmodule Kumi.Apply do
 
     {to_execute, skipped} = preview(entries)
     executed = if to_execute == [], do: [], else: execute!(repo, to_execute)
-    verified = executed == [] or verify!(repo, domains, executed)
+    verified = if executed == [], do: :not_run, else: verify!(repo, domains, executed)
 
     %{executed: executed, skipped: skipped, verified: verified}
   end
@@ -163,9 +164,21 @@ defmodule Kumi.Apply do
       |> Desired.extract()
       |> Diff.diff(Actual.introspect(repo))
 
+    check_verification!(executed, new_ops)
+  end
+
+  # Split out from verify!/3 so the raise path is unit-testable without a
+  # real database: exercising it for real would require an executed op
+  # that Safety/SQL.render's own gates (the three gates this module's
+  # moduledoc lists in full) already prevent from both running AND leaving
+  # residual drift — by design, there's no genuine drift scenario left
+  # that reaches this check and still fails it.
+  @doc false
+  @spec check_verification!([executed_entry()], list()) :: :ok
+  def check_verification!(executed, new_ops) do
     case Enum.filter(executed, fn {op, _sql} -> op in new_ops end) do
       [] ->
-        true
+        :ok
 
       still_present ->
         raise "Kumi.Apply: verification failed — #{length(still_present)} executed op(s) " <>

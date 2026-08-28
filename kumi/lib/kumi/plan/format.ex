@@ -129,6 +129,19 @@ defmodule Kumi.Plan.Format do
   defp format_op({:possible_rename, _table, x, y}),
     do: "  ~ possible rename #{x.name} -> #{y.name} (#{x.type})"
 
+  defp format_op({:change_primary_key, _table, desired_pk, actual_pk}),
+    do: "  ~ primary key (#{Enum.join(actual_pk, ", ")}) -> (#{Enum.join(desired_pk, ", ")})"
+
+  defp format_op({:change_fk, _table, desired_fk, actual_fk}),
+    do:
+      "  ~ fk #{desired_fk.column} #{actual_fk.references_table}.#{actual_fk.references_column} -> " <>
+        "#{desired_fk.references_table}.#{desired_fk.references_column}"
+
+  defp format_op({:change_index, _table, desired_idx, actual_idx}),
+    do:
+      "  ~ index #{desired_idx.name} (#{Enum.join(actual_idx.columns, ", ")})#{unique(actual_idx)} -> " <>
+        "(#{Enum.join(desired_idx.columns, ", ")})#{unique(desired_idx)}"
+
   defp format_changes(changes) do
     Enum.map_join(changes, ", ", fn {field, desired, actual} ->
       "#{field}: #{inspect(actual)} -> #{inspect(desired)}"

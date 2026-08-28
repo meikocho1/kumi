@@ -5,8 +5,11 @@ defmodule KumiStorage.Backend.Local do
   (see `KumiStorage.Backend` moduledoc).
 
   Keys are UUID-based, generated here — the client-supplied filename is
-  NEVER used to build the on-disk path (only its extension, sanitized to
-  a short alnum suffix, is kept). `path/2`, `delete/2`, and `open/2` all
+  NEVER used to build the on-disk path, not even for its extension: the
+  stored extension is derived from the validated `content_type` instead
+  (see `ext_for_content_type/1`), so the allowlist governs what gets
+  served, not whatever suffix the client's filename happened to have.
+  `path/2`, `delete/2`, and `open/2` all
   re-resolve the key against the root and reject anything that would
   escape it (`../..`, absolute-path tricks, etc.) via `Path.expand/1` +
   a prefix check — the same guard `KumiStorage.Plug` relies on to 404
@@ -15,10 +18,14 @@ defmodule KumiStorage.Backend.Local do
 
   @behaviour KumiStorage.Backend
 
+  # filename stays in the signature — it's part of the KumiStorage.Backend
+  # behaviour callback — but is otherwise unused: the stored extension
+  # comes from content_type (see ext_for_content_type/1 below), not from
+  # whatever extension the client's filename happened to carry.
   @impl true
-  def store(source, filename, _content_type, opts) do
+  def store(source, _filename, content_type, opts) do
     root = fetch_root!(opts)
-    key = "#{Ash.UUID.generate()}#{sanitized_ext(filename)}"
+    key = "#{Ash.UUID.generate()}#{ext_for_content_type(content_type)}"
     dest = Path.join(root, key)
 
     with :ok <- File.mkdir_p(root),
@@ -67,16 +74,25 @@ defmodule KumiStorage.Backend.Local do
   defp write({:path, source_path}, dest), do: File.cp(source_path, dest)
   defp write({:binary, data}, dest), do: File.write(dest, data)
 
-  # ponytail: alnum-only, length-capped extension — good enough to keep
-  # keys readable and traversal-proof; not a MIME-vs-extension validator
-  # (that's KumiStorage.Validation's job, upstream of store/4).
-  defp sanitized_ext(filename) do
-    ext = filename |> Path.extname() |> String.downcase()
+  # The stored extension is derived from the *validated* content type, never
+  # from the client-supplied filename — a filename is just a label the
+  # client attaches and proves nothing about the bytes. Deriving from
+  # content_type means the allowlist in KumiStorage.Validation (which the
+  # caller must run before store/4) is what actually governs what
+  # KumiStorage.Plug will later serve: MIME.from_path/1 on the resulting
+  # key can only land on one of these types, or on no match at all.
+  #
+  # A content type outside this map — including one from a caller-supplied
+  # `:allowed_content_types` override — gets no extension at all. That's
+  # deliberate fail-closed behaviour: without a matching extension,
+  # MIME.from_path/1 can't identify the file, so the Plug serves it as
+  # application/octet-stream instead of live content.
+  @content_type_ext %{
+    "image/jpeg" => ".jpg",
+    "image/png" => ".png",
+    "image/gif" => ".gif",
+    "image/webp" => ".webp"
+  }
 
-    if Regex.match?(~r/^\.[a-z0-9]{1,10}$/, ext) do
-      ext
-    else
-      ""
-    end
-  end
+  defp ext_for_content_type(content_type), do: Map.get(@content_type_ext, content_type, "")
 end

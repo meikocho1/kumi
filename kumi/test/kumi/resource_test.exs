@@ -141,6 +141,117 @@ defmodule Kumi.ResourceTest do
     end
   end
 
+  describe "H1 — @before_compile rejects plain Ash sections mixed into `fields do ... end`" do
+    # `@after_verify`-raised exceptions run in a separate checker process
+    # (Module.ParallelChecker) linked to the compiling process — they
+    # surface as an `exit` signal, not a normal raise `assert_raise` can
+    # catch (this is also why Spark's own DSL verifiers route through
+    # `Spark.Test` instead of `assert_raise` — see that module's
+    # moduledoc). `compile_and_catch_after_verify_error/1` traps and
+    # unwraps that exit so the specific error message can be asserted on.
+    test "a plain `attributes do ... end` block alongside `fields do ... end` fails to compile" do
+      source = """
+      defmodule Kumi.Test.Resource.MixedAttributesCheck do
+        use Kumi.Resource,
+          domain: Kumi.Test.ResourceDomain,
+          repo: Kumi.Test.Repo,
+          table: "kumi_test_resource_mixed_attrs_check"
+
+        fields do
+          field :name, :string, required: true
+        end
+
+        attributes do
+          attribute :sneaky, :string do
+            public? true
+          end
+        end
+      end
+      """
+
+      {:error, error} = compile_and_expect_error(source)
+
+      assert %CompileError{description: message} = error
+
+      assert message =~
+               "Kumi.Test.Resource.MixedAttributesCheck declares plain Ash DSL sections that `fields do ... end` did not generate"
+
+      assert message =~ "attributes: [:sneaky]"
+      assert message =~ "would not print these"
+      assert message =~ "mix kumi.expand Kumi.Test.Resource.MixedAttributesCheck"
+    end
+
+    test "a second plain `relationships do ... end` block alongside `fields do ... end` fails to compile" do
+      # `belongs_to` (unlike `has_many`) doesn't require the destination
+      # to already have a matching foreign key column, so it's the
+      # simplest relationship kind to add here without also needing a
+      # migration-shaped fixture.
+      source = """
+      defmodule Kumi.Test.Resource.MixedRelationshipsCheck do
+        use Kumi.Resource,
+          domain: Kumi.Test.ResourceDomain,
+          repo: Kumi.Test.Repo,
+          table: "kumi_test_resource_mixed_rels_check"
+
+        fields do
+          field :name, :string, required: true
+        end
+
+        relationships do
+          belongs_to :sneaky_account, Kumi.Test.Resource.Account do
+            public? true
+          end
+        end
+      end
+      """
+
+      {:error, error} = compile_and_expect_error(source)
+
+      assert %CompileError{description: message} = error
+      assert message =~ "relationships: [:sneaky_account]"
+      # `belongs_to` also implicitly adds its own `:sneaky_account_id`
+      # foreign-key attribute — since it wasn't fields-declared either, it
+      # shows up here too, distinct from the FK-tracking done for a
+      # legitimate `fields do belongs_to ... end` (see the negative case
+      # below and Customer's own :account_id, which is NOT flagged).
+      assert message =~ "attributes: [:sneaky_account_id]"
+    end
+
+    test "a plain `calculations do ... end` block alongside `fields do ... end` fails to compile" do
+      source = """
+      defmodule Kumi.Test.Resource.MixedCalculationsCheck do
+        use Kumi.Resource,
+          domain: Kumi.Test.ResourceDomain,
+          repo: Kumi.Test.Repo,
+          table: "kumi_test_resource_mixed_calcs_check"
+
+        fields do
+          field :name, :string, required: true
+        end
+
+        calculations do
+          calculate :shout, :string, expr(name <> "!")
+        end
+      end
+      """
+
+      {:error, error} = compile_and_expect_error(source)
+
+      assert %CompileError{description: message} = error
+      assert message =~ "calculations: [:shout]"
+    end
+
+    test "negative case: a pure-shorthand module still compiles fine, expand-vs-compiled equivalence still holds" do
+      # Customer (used throughout this file) is exactly this case — no
+      # plain Ash sections, only `fields do ... end`. If the H1 check were
+      # miscalibrated (e.g. flagging belongs_to's own foreign-key
+      # attribute), this module — and the expand-invariant test above —
+      # would already have failed to compile.
+      assert Ash.Resource.Info.resource?(Customer)
+      assert Customer.__kumi_expand__() =~ "defmodule Kumi.Test.Resource.Customer do"
+    end
+  end
+
   describe "Codegen field type mapping (pure, no DB — covers types not exercised by Customer/Note)" do
     test ":integer, :decimal, :boolean, :date, :datetime map to the right Ash attribute types" do
       opts = [domain: Kumi.Test.ResourceDomain, repo: Kumi.Test.Repo, table: "widgets"]
@@ -172,6 +283,73 @@ defmodule Kumi.ResourceTest do
       assert_raise ArgumentError, ~r/:select field requires `options:`/, fn ->
         Kumi.Resource.Codegen.generate(Kumi.Test.Resource.Widget, opts, specs)
       end
+    end
+  end
+
+  # `@after_verify` failures crash the (linked) compiler-checker process
+  # rather than raising in the calling process, so `assert_raise` can't
+  # observe them directly. Compiling inside a `Task` we're linked to (and
+  # trapping exits for) converts that crash into a normal `catch :exit`
+  # in this process, from which the original raised exception can be
+  # recovered. Stderr is captured because Ash also logs an unrelated
+  # "not present in any known Ash.Domain" warning for these
+  # not-registered-in-ResourceDomain probe modules — same reason the
+  # expand-invariant test above captures it.
+  # The D1 completeness check raises a CompileError from
+  # `Kumi.Resource.__before_compile__/1`, i.e. synchronously during macro
+  # expansion — so `rescue` sees it directly, unlike the `@after_verify`
+  # mechanism this originally used (that one raises inside
+  # `Module.ParallelChecker` and reaches the caller as an EXIT).
+  # `capture_io/2` returns the captured output rather than the function's
+  # value, hence the process-dictionary hand-off.
+  defp compile_and_expect_error(source) do
+    key = make_ref()
+
+    capture_io(:stderr, fn ->
+      outcome =
+        try do
+          Code.compile_string(source)
+          :ok
+        rescue
+          error -> {:error, error}
+        end
+
+      Process.put(key, outcome)
+    end)
+
+    Process.get(key)
+  end
+
+  describe "H2 — field option whitelist (FieldSpec.parse/2)" do
+    test "an unknown option key raises ArgumentError naming it (typo: requried instead of required)" do
+      ast = quote(do: field(:name, :string, requried: true))
+
+      assert_raise ArgumentError, ~r/unknown option\(s\) \[:requried\]/, fn ->
+        Kumi.Resource.FieldSpec.parse(ast, __ENV__)
+      end
+    end
+
+    test "real Ash attribute options (allow_nil?, public?) that Codegen never reads are rejected, not silently dropped" do
+      ast = quote(do: field(:x, :string, allow_nil?: false, public?: false))
+
+      assert_raise ArgumentError, ~r/unknown option\(s\) \[:allow_nil\?, :public\?\]/, fn ->
+        Kumi.Resource.FieldSpec.parse(ast, __ENV__)
+      end
+    end
+
+    test "error message lists the accepted keys for the field's kind" do
+      ast = quote(do: field(:status, :select, bogus: true))
+
+      assert_raise ArgumentError,
+                   ~r/Accepted options for :select fields: \[:required, :default, :options\]/,
+                   fn -> Kumi.Resource.FieldSpec.parse(ast, __ENV__) end
+    end
+
+    test "a scalar field accepts :required and :default (no false positive)" do
+      ast = quote(do: field(:name, :string, required: true, default: "x"))
+
+      assert [%Kumi.Resource.FieldSpec{opts: [required: true, default: "x"]}] =
+               Kumi.Resource.FieldSpec.parse(ast, __ENV__)
     end
   end
 

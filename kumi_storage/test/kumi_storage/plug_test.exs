@@ -38,6 +38,7 @@ defmodule KumiStorage.PlugTest do
     assert conn.status == 200
     assert conn.resp_body == "png-bytes"
     assert get_resp_header(conn, "content-type") == ["image/png"]
+    assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
   end
 
   test "404s on a missing key" do
@@ -47,6 +48,7 @@ defmodule KumiStorage.PlugTest do
     conn = KumiStorage.Plug.call(conn, [])
 
     assert conn.status == 404
+    assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
   end
 
   test "404s on a traversal attempt instead of serving an arbitrary file" do

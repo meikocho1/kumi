@@ -39,13 +39,66 @@ defmodule KumiStorage.Backend.LocalTest do
       assert key =~ ~r/^[0-9a-f-]{36}\.png$/
     end
 
-    test "keeps a sanitized extension, drops an unrecognized/dangerous one", %{opts: opts} do
+    test "the stored extension comes from content_type, not the filename", %{opts: opts} do
+      # The stored extension used to come from the client filename — that
+      # was the stored-XSS vector. It now comes from the validated content
+      # type, so a filename with a dangerous or useless extension changes
+      # nothing about the key.
       {:ok, key} = Local.store({:binary, "x"}, "a.PNG", "image/png", opts)
       assert String.ends_with?(key, ".png")
 
       {:ok, key2} = Local.store({:binary, "x"}, "../../etc/passwd", "image/png", opts)
       refute key2 =~ "/"
       refute key2 =~ ".."
+      assert String.ends_with?(key2, ".png")
+    end
+
+    test "mismatched filename/content_type pair: evil.html claimed as image/png stores as .png",
+         %{opts: opts} do
+      {:ok, key} = Local.store({:binary, "x"}, "evil.html", "image/png", opts)
+      {:ok, path} = Local.path(key, opts)
+
+      assert String.ends_with?(key, ".png")
+      assert MIME.from_path(path) == "image/png"
+    end
+
+    test "mismatched filename/content_type pair: evil.svg claimed as image/png stores as .png",
+         %{opts: opts} do
+      {:ok, key} = Local.store({:binary, "x"}, "evil.svg", "image/png", opts)
+      {:ok, path} = Local.path(key, opts)
+
+      assert String.ends_with?(key, ".png")
+      assert MIME.from_path(path) == "image/png"
+    end
+
+    test "a content_type outside the fixed extension map stores with no extension, serving as octet-stream",
+         %{opts: opts} do
+      # application/pdf only reaches store/4 at all because the caller
+      # overrode :allowed_content_types — the default allowlist rejects it.
+      assert :ok =
+               KumiStorage.Validation.validate("doc.pdf", "application/pdf", 100,
+                 allowed_content_types: ~w(application/pdf)
+               )
+
+      {:ok, key} = Local.store({:binary, "x"}, "doc.pdf", "application/pdf", opts)
+      {:ok, path} = Local.path(key, opts)
+
+      refute key =~ "."
+      assert MIME.from_path(path) == "application/octet-stream"
+    end
+
+    test "each allowlisted content type maps to its expected extension", %{opts: opts} do
+      for {content_type, expected_ext} <- %{
+            "image/jpeg" => ".jpg",
+            "image/png" => ".png",
+            "image/gif" => ".gif",
+            "image/webp" => ".webp"
+          } do
+        {:ok, key} = Local.store({:binary, "x"}, "irrelevant.bin", content_type, opts)
+
+        assert String.ends_with?(key, expected_ext),
+               "expected #{content_type} -> #{expected_ext}, got #{key}"
+      end
     end
   end
 

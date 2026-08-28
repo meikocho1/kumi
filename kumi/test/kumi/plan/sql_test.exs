@@ -8,14 +8,14 @@ defmodule Kumi.Plan.SQLTest do
     col = %Column{name: "email", type: "text", nullable: false}
 
     assert SQL.render({:add_column, "crm_accounts", col}) ==
-             {:ok, "ALTER TABLE crm_accounts ADD COLUMN email text NOT NULL;"}
+             {:ok, ~s(ALTER TABLE "crm_accounts" ADD COLUMN "email" text NOT NULL;)}
   end
 
   test "add_column renders without NOT NULL when nullable" do
     col = %Column{name: "email", type: "text", nullable: true}
 
     assert SQL.render({:add_column, "crm_accounts", col}) ==
-             {:ok, "ALTER TABLE crm_accounts ADD COLUMN email text;"}
+             {:ok, ~s(ALTER TABLE "crm_accounts" ADD COLUMN "email" text;)}
   end
 
   test "add_fk renders the FOREIGN KEY one-liner" do
@@ -28,36 +28,44 @@ defmodule Kumi.Plan.SQLTest do
 
     assert SQL.render({:add_fk, "crm_deals", fk}) ==
              {:ok,
-              "ALTER TABLE crm_deals ADD CONSTRAINT crm_deals_account_id_fkey " <>
-                "FOREIGN KEY (account_id) REFERENCES crm_accounts (id);"}
+              ~s(ALTER TABLE "crm_deals" ADD CONSTRAINT "crm_deals_account_id_fkey" ) <>
+                ~s{FOREIGN KEY ("account_id") REFERENCES "crm_accounts" ("id");}}
   end
 
   test "add_index renders CREATE UNIQUE INDEX when unique" do
     idx = %Index{name: "crm_accounts_email_index", columns: ["email"], unique: true}
 
     assert SQL.render({:add_index, "crm_accounts", idx}) ==
-             {:ok, "CREATE UNIQUE INDEX crm_accounts_email_index ON crm_accounts (email);"}
+             {:ok,
+              ~s{CREATE UNIQUE INDEX "crm_accounts_email_index" ON "crm_accounts" ("email");}}
   end
 
   test "add_index renders plain CREATE INDEX when not unique" do
     idx = %Index{name: "crm_accounts_email_index", columns: ["email"], unique: false}
 
     assert SQL.render({:add_index, "crm_accounts", idx}) ==
-             {:ok, "CREATE INDEX crm_accounts_email_index ON crm_accounts (email);"}
+             {:ok, ~s{CREATE INDEX "crm_accounts_email_index" ON "crm_accounts" ("email");}}
+  end
+
+  test "add_index quotes every column in a multi-column index" do
+    idx = %Index{name: "crm_accounts_a_b_index", columns: ["a", "b"], unique: false}
+
+    assert SQL.render({:add_index, "crm_accounts", idx}) ==
+             {:ok, ~s{CREATE INDEX "crm_accounts_a_b_index" ON "crm_accounts" ("a", "b");}}
   end
 
   test "change_column: nullable false -> SET NOT NULL" do
     col = %Column{name: "email", type: "text", nullable: false}
 
     assert SQL.render({:change_column, "t", col, [{:nullable, false, true}]}) ==
-             {:ok, "ALTER TABLE t ALTER COLUMN email SET NOT NULL;"}
+             {:ok, ~s(ALTER TABLE "t" ALTER COLUMN "email" SET NOT NULL;)}
   end
 
   test "change_column: nullable true -> DROP NOT NULL" do
     col = %Column{name: "email", type: "text", nullable: true}
 
     assert SQL.render({:change_column, "t", col, [{:nullable, true, false}]}) ==
-             {:ok, "ALTER TABLE t ALTER COLUMN email DROP NOT NULL;"}
+             {:ok, ~s(ALTER TABLE "t" ALTER COLUMN "email" DROP NOT NULL;)}
   end
 
   test "change_column: type + nullable join into one comma-separated statement" do
@@ -67,7 +75,8 @@ defmodule Kumi.Plan.SQLTest do
              {:change_column, "t", col, [{:type, "bigint", "integer"}, {:nullable, false, true}]}
            ) ==
              {:ok,
-              "ALTER TABLE t ALTER COLUMN amount TYPE bigint, ALTER COLUMN amount SET NOT NULL;"}
+              ~s(ALTER TABLE "t" ALTER COLUMN "amount" TYPE bigint, ) <>
+                ~s(ALTER COLUMN "amount" SET NOT NULL;)}
   end
 
   test "change_column: a default change alone is :unsupported" do
@@ -95,10 +104,10 @@ defmodule Kumi.Plan.SQLTest do
     col = %Column{name: "legacy_phone", type: "text", nullable: true}
 
     assert SQL.render({:remove_column, "crm_accounts", col}) ==
-             {:ok, "ALTER TABLE crm_accounts DROP COLUMN legacy_phone;"}
+             {:ok, ~s(ALTER TABLE "crm_accounts" DROP COLUMN "legacy_phone";)}
 
     assert SQL.render({:drop_table, %Table{name: "old_stuff"}}) ==
-             {:ok, "DROP TABLE old_stuff;"}
+             {:ok, ~s(DROP TABLE "old_stuff";)}
 
     fk = %ForeignKey{
       name: "t_x_fkey",
@@ -107,10 +116,11 @@ defmodule Kumi.Plan.SQLTest do
       references_column: "id"
     }
 
-    assert SQL.render({:remove_fk, "t", fk}) == {:ok, "ALTER TABLE t DROP CONSTRAINT t_x_fkey;"}
+    assert SQL.render({:remove_fk, "t", fk}) ==
+             {:ok, ~s(ALTER TABLE "t" DROP CONSTRAINT "t_x_fkey";)}
 
     idx = %Index{name: "t_x_index", columns: ["x"], unique: false}
-    assert SQL.render({:remove_index, "t", idx}) == {:ok, "DROP INDEX t_x_index;"}
+    assert SQL.render({:remove_index, "t", idx}) == {:ok, ~s(DROP INDEX "t_x_index";)}
   end
 
   test "possible_rename renders RENAME COLUMN" do
@@ -118,10 +128,48 @@ defmodule Kumi.Plan.SQLTest do
     y = %Column{name: "phone_number", type: "text", nullable: true}
 
     assert SQL.render({:possible_rename, "crm_accounts", x, y}) ==
-             {:ok, "ALTER TABLE crm_accounts RENAME COLUMN phone TO phone_number;"}
+             {:ok, ~s(ALTER TABLE "crm_accounts" RENAME COLUMN "phone" TO "phone_number";)}
   end
 
   test "add_table is always :unsupported (no CREATE TABLE reconstruction)" do
     assert SQL.render({:add_table, %Table{name: "crm_deals"}}) == :unsupported
+  end
+
+  test "change_primary_key, change_fk, change_index are always :unsupported (no single-statement form)" do
+    fk = %ForeignKey{
+      name: "t_a_fkey",
+      column: "account_id",
+      references_table: "accounts",
+      references_column: "id"
+    }
+
+    changed_fk = %{fk | references_table: "legacy_accounts"}
+    idx = %Index{name: "t_email_index", columns: ["email"], unique: true}
+    changed_idx = %{idx | columns: ["username"], unique: false}
+
+    assert SQL.render({:change_primary_key, "t", ["id"], []}) == :unsupported
+    assert SQL.render({:change_fk, "t", fk, changed_fk}) == :unsupported
+    assert SQL.render({:change_index, "t", idx, changed_idx}) == :unsupported
+  end
+
+  describe "identifier quoting (M1)" do
+    test "a reserved-word column name is quoted, not a syntax error" do
+      col = %Column{name: "order", type: "text", nullable: true}
+
+      assert SQL.render({:add_column, "groups", col}) ==
+               {:ok, ~s(ALTER TABLE "groups" ADD COLUMN "order" text;)}
+    end
+
+    test "a mixed-case column name is quoted, preventing silent lowercase-folding" do
+      col = %Column{name: "myColumn", type: "text", nullable: true}
+
+      assert SQL.render({:add_column, "t", col}) ==
+               {:ok, ~s(ALTER TABLE "t" ADD COLUMN "myColumn" text;)}
+    end
+
+    test "a mixed-case table name is quoted" do
+      assert SQL.render({:drop_table, %Table{name: "MyTable"}}) ==
+               {:ok, ~s(DROP TABLE "MyTable";)}
+    end
   end
 end

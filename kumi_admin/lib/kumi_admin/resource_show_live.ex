@@ -44,6 +44,15 @@ defmodule KumiAdmin.ResourceShowLive do
     end
   end
 
+  # LiveView events come from the client, not from the rendered DOM — an
+  # authenticated user can push "delete" over the socket while the page
+  # is in its not-found/forbidden state (`record` is nil), even though
+  # the Delete button isn't rendered there. Guard it rather than let
+  # `Ash.destroy(nil, ...)` crash the process (L5).
+  def handle_event("delete", _params, %{assigns: %{record: nil}} = socket) do
+    {:noreply, put_flash(socket, :error, "You don't have permission to do that.")}
+  end
+
   def handle_event("delete", _params, socket) do
     case Ash.destroy(socket.assigns.record, actor: socket.assigns.actor) do
       :ok ->
@@ -116,18 +125,40 @@ defmodule KumiAdmin.ResourceShowLive do
               can_destroy?: KumiAdmin.Capability.can_destroy?(record, socket.assigns.actor)
             )
 
-          {:error, _reason} ->
-            assign(socket,
-              error: :forbidden,
-              record: nil,
-              attributes: [],
-              relationships: [],
-              has_many_sections: [],
-              can_update?: false,
-              can_destroy?: false
-            )
+          # A record hidden by a filter-based read policy (the default)
+          # never raises Forbidden — Ash reports it the same way as a
+          # genuinely missing id: `Ash.Error.Invalid` wrapping
+          # `Ash.Error.Query.NotFound` (see `Ash.get/3`). Folding that
+          # into the same honest state as a real policy Forbidden is
+          # deliberate, not a gap: telling the two apart would let a user
+          # probe which ids exist. Anything else is a genuine bug (e.g. a
+          # bad query) and must not be reported as "No access" (M3/M4).
+          {:error, %Ash.Error.Forbidden{}} ->
+            forbidden_record_state(socket)
+
+          {:error, %Ash.Error.Invalid{errors: errors} = error} ->
+            if Enum.any?(errors, &match?(%Ash.Error.Query.NotFound{}, &1)) do
+              forbidden_record_state(socket)
+            else
+              raise error
+            end
+
+          {:error, error} ->
+            raise error
         end
     end
+  end
+
+  defp forbidden_record_state(socket) do
+    assign(socket,
+      error: :forbidden,
+      record: nil,
+      attributes: [],
+      relationships: [],
+      has_many_sections: [],
+      can_update?: false,
+      can_destroy?: false
+    )
   end
 
   defp belongs_to_relationships(resource) do
@@ -184,8 +215,15 @@ defmodule KumiAdmin.ResourceShowLive do
           error: nil
         })
 
-      {:error, _reason} ->
+      # Unlike a single-record `Ash.get`, a has_many load can't 404 — a
+      # filter-based policy just yields an empty list, never an error. A
+      # real error here is either a genuine policy Forbidden or a bug;
+      # only the former is an honest "No access" (M3).
+      {:error, %Ash.Error.Forbidden{}} ->
         Map.merge(base, %{rows: [], has_more?: false, error: :forbidden})
+
+      {:error, error} ->
+        raise error
     end
   end
 

@@ -15,15 +15,22 @@ defmodule Kumi.Schema.Column do
       `Kumi.Schema.Default` and the Spike 1 friction log.
 
   `datetime_precision` is compared by plain equality like every other field
-  (`Kumi.Diff` does not special-case it) — it is `nil` for any non-datetime
-  column on both sides (so it never diffs in practice) and an integer (0-6)
-  for a `timestamp`-family column: fractional-second digits stored.
-  `:utc_datetime` / `:naive_datetime` are always precision 0;
-  `:utc_datetime_usec` / `:naive_datetime_usec` default to precision 6 in
-  Postgres. A `nil` vs. integer mismatch can only arise alongside a `:type`
-  change (a column becoming/stopping being a timestamp type) — see the
-  defensive fallback clause in `Kumi.Plan.Safety.classify_change/2`, which
-  lets that accompanying type change's DANGEROUS classification dominate.
+  (`Kumi.Diff` does not special-case it). It is NOT nil-for-every-non-
+  timestamp-column: Postgres reports a real integer for `date` (`0`) and
+  `interval` (`6`) columns too, not just `timestamp`/`time` — confirmed
+  empirically against a real Postgres 17. It is `nil` only for types
+  Postgres genuinely reports no precision for at all
+  (`uuid`, `text`, `numeric`, `bool`, `jsonb`, arrays, ...). For the
+  precision-bearing types: `:date` is always `0`; `:time` / `:utc_datetime`
+  / `:naive_datetime` are always `0`; `:time_usec` / `:utc_datetime_usec` /
+  `:naive_datetime_usec` / `:duration` default to `6` in Postgres. A `nil`
+  vs. integer mismatch usually arrives alongside a `:type` change (a column
+  becoming/stopping being a precision-bearing type), but `Kumi.Plan.Safety`
+  does NOT assume that — a change list can, in principle, carry a
+  `:datetime_precision` change with no `:type` entry (e.g. an unmapped or
+  future `PgType` gap), so `classify_change/2`'s catch-all classifies that
+  case REVIEW on its own merits rather than trusting a sibling change to
+  dominate it.
   See `Kumi.Desired.PgType.precision_from_ash/2` and v0.1.5 friction log
   (F18, F33-35).
   """

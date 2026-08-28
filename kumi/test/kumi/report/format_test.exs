@@ -47,4 +47,25 @@ defmodule Kumi.Report.FormatTest do
     assert text =~ "DANGEROUS"
     assert text =~ "Verdict: blocked"
   end
+
+  test "H3: change_primary_key/change_fk/change_index each describe without crashing" do
+    alias Kumi.Schema.{ForeignKey, Index}
+
+    fk = %ForeignKey{name: "fk", column: "a", references_table: "b", references_column: "id"}
+    idx = %Index{name: "idx", columns: ["a"], unique: true}
+
+    plan =
+      Plan.build([
+        {:change_primary_key, "t", ["id"], []},
+        {:change_fk, "t", fk, %{fk | references_table: "c"}},
+        {:change_index, "t", idx, %{idx | columns: ["b"]}}
+      ])
+
+    steps = [step(:plan, :fail, "blocked: 0 safe / 3 review / 0 dangerous")]
+    text = Format.format(Report.build(steps, plan))
+
+    assert text =~ "change_primary_key t"
+    assert text =~ "change_fk t.a"
+    assert text =~ "change_index t.idx"
+  end
 end

@@ -16,6 +16,24 @@ defmodule Kumi.Resource.FieldSpec do
           opts: keyword()
         }
 
+  # H2 fix: whitelists of the only opts `Kumi.Resource.Codegen` actually
+  # reads (`attribute_source/1` reads `:required`/`:default`;
+  # `constraint_line/2` additionally reads `:options` for `:select`).
+  # Anything outside these lists is silently dropped by Codegen today —
+  # accepting it here without checking turns a typo (`requried: true`)
+  # into silent data loss (a column that should be NOT NULL isn't).
+  @scalar_field_opts [:required, :default]
+  @select_field_opts [:required, :default, :options]
+  # `:to` names the belongs_to destination and is consumed during parsing
+  # (never stored) — listed here so it counts as accepted rather than
+  # showing up in an "unknown option" message. A *missing* `:to` is
+  # caught earlier by the `Keyword.fetch` above with its own dedicated
+  # message; a *misspelled* `to:` (e.g. `too:`) is indistinguishable from
+  # missing and surfaces that same message, not this whitelist's — which
+  # is fine, since "requires a `to:` target" is the more actionable of
+  # the two for that case.
+  @image_field_opts [:to, :required]
+
   @doc """
   Parses a `fields do ... end` block's AST into a list of `t()`, resolving
   `belongs_to`/`has_many` destination aliases against `env` (so `alias`ed
@@ -38,9 +56,17 @@ defmodule Kumi.Resource.FieldSpec do
         raise ArgumentError, image_missing_to_message(name)
 
       {:ok, dest_ast} ->
+        validate_opts!(name, :image, opts, @image_field_opts)
         dest = resolve_module(dest_ast, env)
         validate_attachment_target!(name, dest)
-        %__MODULE__{kind: :belongs_to, name: name, type: dest, opts: []}
+        # `to:` is consumed above (it selected `dest`); the only opt the
+        # resulting belongs_to sugar can still carry is `required:`.
+        %__MODULE__{
+          kind: :belongs_to,
+          name: name,
+          type: dest,
+          opts: Keyword.take(opts, [:required])
+        }
     end
   end
 
@@ -51,6 +77,7 @@ defmodule Kumi.Resource.FieldSpec do
 
   defp parse_expr({:field, _, [name, type, opts]}, _env)
        when is_atom(name) and is_atom(type) and is_list(opts) do
+    validate_opts!(name, type, opts, allowed_opts_for(type))
     %__MODULE__{kind: :field, name: name, type: type, opts: opts}
   end
 
@@ -66,6 +93,25 @@ defmodule Kumi.Resource.FieldSpec do
     raise ArgumentError,
           "Kumi.Resource: unrecognized field declaration inside `fields do ... end`: " <>
             Macro.to_string(other)
+  end
+
+  defp allowed_opts_for(:select), do: @select_field_opts
+  defp allowed_opts_for(_other), do: @scalar_field_opts
+
+  defp validate_opts!(name, kind, opts, allowed) do
+    case Keyword.keys(opts) -- allowed do
+      [] -> :ok
+      extra_keys -> raise ArgumentError, bad_opts_message(name, kind, extra_keys, allowed)
+    end
+  end
+
+  defp bad_opts_message(name, kind, extra_keys, allowed) do
+    """
+    Kumi.Resource: `field #{inspect(name)}, #{inspect(kind)}` — unknown option(s) \
+    #{inspect(extra_keys)}.
+
+    Accepted options for #{inspect(kind)} fields: #{inspect(allowed)}
+    """
   end
 
   defp resolve_module(ast, env) do

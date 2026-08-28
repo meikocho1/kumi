@@ -26,6 +26,15 @@ defmodule Kumi.Test.Account do
       public? true
     end
 
+    # H4 regression coverage: a bare `:date` attribute exercises
+    # `Kumi.Desired.PgType.precision_from_ash/2`'s `:date -> 0` clause end
+    # to end. Before that fix, this column alone made the clean-state
+    # zero-diff test (`Kumi.DiffCleanStateTest`) fail permanently: Ash's
+    # side reported `datetime_precision: nil`, Postgres reports `0`.
+    attribute :founded_on, :date do
+      public? true
+    end
+
     timestamps()
   end
 

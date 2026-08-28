@@ -2,7 +2,7 @@ defmodule KumiAdmin.FormFieldsTest do
   use ExUnit.Case, async: true
 
   alias KumiAdmin.FormFields
-  alias KumiAdmin.Test.{Attachment, Contact, Person, Widget}
+  alias KumiAdmin.Test.{Attachment, Contact, Person, ReadOnly, Widget}
 
   describe "for_action/2 — field derivation" do
     test "only fields in the create action's accept list are returned, in declaration order" do
@@ -38,6 +38,14 @@ defmodule KumiAdmin.FormFieldsTest do
 
       assert {:upload, relationship} = avatar_field.widget
       assert relationship.destination == Attachment
+    end
+
+    test "a resource with no primary create/update action returns nil instead of raising (M6)" do
+      # Ash.Resource.Info.primary_action!/2 would raise here — the bang
+      # variant is exactly what crashed /new and /:id/edit for a
+      # read-only resource before this fix.
+      assert FormFields.for_action(ReadOnly, :create) == nil
+      assert FormFields.for_action(ReadOnly, :update) == nil
     end
   end
 

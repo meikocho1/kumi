@@ -38,6 +38,15 @@ defmodule KumiAdmin.Router do
       Defaults to `"/register"`.
     * `:live_session_name` — defaults to `:kumi_admin`.
 
+  ## Requirements on managed resources
+
+  Every resource passed to `resources`/`navigation` must have a single
+  primary key named `:id` — the generic index/show/form LiveViews sort,
+  link, and look up records by that name unconditionally (e.g.
+  `Ash.Query.sort(:id)`). A resource with a differently-named or
+  composite primary key will fail at read time, not at compile time here
+  (a `Kumi.App` compile-time verifier enforces this on the app side).
+
   ## Auth gate
 
   KumiAdmin is a post-login experience: every LiveView calls

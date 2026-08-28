@@ -97,4 +97,38 @@ defmodule Kumi.ResourceImageFieldTest do
       refute expanded =~ ":image"
     end
   end
+
+  describe "H2 fix: :image carries `required:` through to the belongs_to it expands to" do
+    test "produces a relationship AND a foreign-key attribute both with allow_nil? == false" do
+      source = """
+      defmodule Kumi.Test.Resource.RequiredImageFieldCheck do
+        use Kumi.Resource,
+          domain: Kumi.Test.ResourceDomain,
+          repo: Kumi.Test.Repo,
+          table: "kumi_test_resource_required_image_field_check"
+
+        fields do
+          field :name, :string, required: true
+          field :avatar, :image, to: Kumi.Test.Resource.Account, required: true
+        end
+      end
+      """
+
+      capture_io(:stderr, fn -> Code.compile_string(source) end)
+
+      mod = Kumi.Test.Resource.RequiredImageFieldCheck
+
+      rel = Ash.Resource.Info.relationship(mod, :avatar)
+      assert rel.type == :belongs_to
+      assert rel.destination == Account
+      assert rel.allow_nil? == false
+
+      fk_attribute = Ash.Resource.Info.attribute(mod, :avatar_id)
+      assert fk_attribute.allow_nil? == false
+
+      expanded = mod.__kumi_expand__()
+      assert expanded =~ "belongs_to :avatar, Kumi.Test.Resource.Account"
+      assert expanded =~ "allow_nil?(false)"
+    end
+  end
 end

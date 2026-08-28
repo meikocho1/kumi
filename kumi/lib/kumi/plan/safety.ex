@@ -17,7 +17,16 @@ defmodule Kumi.Plan.Safety do
       default/backfill), UNIQUE index, FK add/remove on an existing table,
       `possible_rename` (a heuristic guess, not a fact), `remove_index`
       (indexes are never hand-authored in code here, so removing one is
-      always drift), and a known-safe *widening* type change.
+      always drift), a known-safe *widening* type change, and a nil-sided
+      `:datetime_precision` change with no accompanying `:type` change to
+      explain it (a `Kumi.Desired.PgType` mapping gap — the catch-all fails
+      closed here rather than assuming a sibling change exists). Also
+      REVIEW: `change_primary_key`, `change_fk` (target table/column
+      differs) and `change_index` (columns/uniqueness differ) — none of
+      these deletes data outright (so DANGEROUS overstates it) and none is
+      a pure addition (so SAFE is wrong); each needs a DROP+CREATE (or
+      DROP/ADD CONSTRAINT) pair that only a human should approve, so they
+      land in this same "constraint tightening or guess" bucket.
 
     * SAFE — pure, additive, non-destructive: `add_table`, a nullable
       `add_column`, a non-unique `add_index` (production should still use
@@ -77,6 +86,23 @@ defmodule Kumi.Plan.Safety do
   def classify({:remove_index, _table, idx}),
     do: {:review, "removes index #{idx.name} — only ever drift, not requested by code"}
 
+  def classify({:change_primary_key, _table, desired_pk, actual_pk}),
+    do:
+      {:review,
+       "primary key changed #{inspect(actual_pk)} -> #{inspect(desired_pk)} — needs DROP CONSTRAINT + ADD CONSTRAINT, verify manually"}
+
+  def classify({:change_fk, _table, desired_fk, actual_fk}),
+    do:
+      {:review,
+       "FK #{desired_fk.column} target changed #{actual_fk.references_table}.#{actual_fk.references_column} -> " <>
+         "#{desired_fk.references_table}.#{desired_fk.references_column}"}
+
+  def classify({:change_index, _table, desired_idx, actual_idx}),
+    do:
+      {:review,
+       "index #{desired_idx.name} definition changed — columns #{inspect(actual_idx.columns)} -> #{inspect(desired_idx.columns)}, " <>
+         "unique #{actual_idx.unique} -> #{desired_idx.unique}"}
+
   def classify({:possible_rename, _table, x, y}),
     do:
       {:review,
@@ -122,14 +148,19 @@ defmodule Kumi.Plan.Safety do
          {:review,
           "narrows #{col.name} timestamp precision #{actual} -> #{desired} (rounds sub-second values, does not fail)"}
 
-  # One side nil means the column stopped/started being a timestamp type
-  # entirely — that always arrives alongside a `:type` change, which
-  # already fails closed to DANGEROUS via `worst/1`. Nothing extra to say
-  # about precision alone here.
+  # One side nil means the column stopped/started being a precision-bearing
+  # type entirely. This USUALLY arrives alongside a `:type` change, which
+  # would fail closed to DANGEROUS via `worst/1` on its own — but this
+  # clause must not assume that. It is the module's only catch-all, so it
+  # is the last line of defense for the next `PgType` mapping gap (H4 was
+  # exactly this: a `:date` column produced this precision shape with NO
+  # accompanying `:type` change, and this clause used to return `:safe`
+  # here, silently). Fail closed to REVIEW instead of asserting a sibling
+  # change that may not exist.
   defp classify_change(col, {:datetime_precision, desired, actual}),
     do:
-      {:safe,
-       "#{col.name} timestamp-ness changed (precision #{inspect(actual)} -> #{inspect(desired)}) — see accompanying type change"}
+      {:review,
+       "#{col.name} timestamp-ness changed (precision #{inspect(actual)} -> #{inspect(desired)}) — verify manually"}
 
   defp worst(changes), do: Enum.max_by(changes, fn {level, _reason} -> severity(level) end)
 

@@ -12,6 +12,12 @@ defmodule KumiStorage.Plug do
   404s on a missing file OR a key that resolves outside the backend's
   root (`Backend.path/2` returns `:error` for those) — never lets
   `Plug.Conn.send_file/3` see a path a client shouldn't be able to reach.
+
+  Every response (success and 404) carries `x-content-type-options:
+  nosniff` — defence in depth against a browser second-guessing the
+  Content-Type this plug sets, on top of `KumiStorage.Backend.Local`
+  deriving the stored extension from the validated content type rather
+  than the client-supplied filename.
   """
 
   @behaviour Plug
@@ -30,10 +36,15 @@ defmodule KumiStorage.Plug do
          {:ok, path} <- backend.path(key, backend_opts),
          true <- File.regular?(path) do
       conn
+      |> put_resp_header("x-content-type-options", "nosniff")
       |> put_resp_content_type(MIME.from_path(path), nil)
       |> send_file(200, path)
     else
-      _ -> conn |> send_resp(404, "Not Found") |> halt()
+      _ ->
+        conn
+        |> put_resp_header("x-content-type-options", "nosniff")
+        |> send_resp(404, "Not Found")
+        |> halt()
     end
   end
 end

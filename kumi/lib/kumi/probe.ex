@@ -33,7 +33,7 @@ defmodule Kumi.Probe do
   """
 
   alias Kumi.Plan.Finding
-  alias Kumi.Schema.Index
+  alias Kumi.Schema.{Ident, Index}
 
   @spec run(module(), Kumi.Plan.t()) :: [Finding.t()]
   def run(repo, %Kumi.Plan{entries: entries}) do
@@ -132,12 +132,14 @@ defmodule Kumi.Probe do
   end
 
   @doc """
-  Quotes a Postgres identifier: wraps it in double quotes, doubling any
-  embedded double quote. Used for every table/column name interpolated into
-  probe SQL — see the moduledoc.
+  Quotes a Postgres identifier. Delegates to `Kumi.Schema.Ident` — the one
+  shared implementation, also used by `Kumi.Plan.SQL` (see that module and
+  `Kumi.Schema.Ident`'s moduledoc for why this used to be duplicated and
+  why it no longer is). Kept as a public function here since existing
+  callers/tests reach it as `Kumi.Probe.quote_ident/1`.
   """
   @spec quote_ident(String.t()) :: String.t()
-  def quote_ident(name), do: "\"" <> String.replace(name, "\"", "\"\"") <> "\""
+  defdelegate quote_ident(name), to: Ident
 
   defp scalar!(repo, sql) do
     %{rows: [[count]]} = Ecto.Adapters.SQL.query!(repo, sql, [])

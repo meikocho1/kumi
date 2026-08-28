@@ -113,11 +113,16 @@ defmodule Mix.Tasks.Kumi.Report do
   # agent needs the full log (it can re-run the underlying mix command).
   # `mix format --check-formatted`'s diff is colored; ANSI is stripped so
   # `--json` `detail` strings stay plain text for an AI/CI consumer.
-  defp truncate(output) do
+  # `@doc false`, not `defp`: `String.split("", "\n")` returns `[""]`, not
+  # `[]` — a truly empty step output never hits an empty-list branch, so
+  # `[""]` is the case that must be matched explicitly. Kept public (only)
+  # so this is unit-testable without shelling out a real empty-output step.
+  @doc false
+  def truncate(output) do
     lines = @ansi_escape |> Regex.replace(output, "") |> String.trim() |> String.split("\n")
 
     case lines do
-      [] -> "(no output)"
+      [""] -> "(no output)"
       lines when length(lines) <= 20 -> Enum.join(lines, "\n")
       lines -> lines |> Enum.take(20) |> Enum.join("\n") |> Kernel.<>("\n... (truncated)")
     end

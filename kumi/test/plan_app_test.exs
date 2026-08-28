@@ -8,10 +8,12 @@ defmodule Kumi.PlanAppTest do
   test "plan_app scopes the diff to the app's declared resources only" do
     plan = Kumi.plan_app(Kumi.Test.App)
 
+    # This alone proves both-side filtering: Kumi.Test.App declares only
+    # Kumi.Test.Account, but kumi_test_deals exists and is migrated in the
+    # same repo — if plan_app/2 filtered only the DESIRED side (or only the
+    # ACTUAL side), the mismatch would show up here as a non-empty diff
+    # either way. An empty diff is only possible when both sides agree to
+    # ignore kumi_test_deals.
     assert plan.entries == []
-
-    refute Enum.any?(plan.entries, fn {op, _, _} ->
-             match?({:drop_table, %{name: "kumi_test_deals"}}, op)
-           end)
   end
 end

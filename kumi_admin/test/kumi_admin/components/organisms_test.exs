@@ -112,7 +112,11 @@ defmodule KumiAdmin.Components.OrganismsTest do
       refute html =~ "kumi-admin-table"
     end
 
-    test "empty section shows 'No records yet.'" do
+    test "empty section shows the non-committal 'No records visible to you.' (M4)" do
+      # Not "No records yet." — a filter-based read policy (the default)
+      # makes an unauthorized child load look identical to a genuinely
+      # empty relationship, so the wording must not claim the table is
+      # empty. See `KumiAdmin.ResourceIndexLive`'s matching fix.
       section = base_section(%{})
 
       html =
@@ -124,7 +128,8 @@ defmodule KumiAdmin.Components.OrganismsTest do
           """
         end)
 
-      assert html =~ "No records yet."
+      assert html =~ "No records visible to you."
+      refute html =~ "No records yet."
     end
 
     test "rows render as a table, id column linked when linkable?, and overflow footer when has_more?" do

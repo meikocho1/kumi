@@ -58,4 +58,11 @@ defmodule Kumi.Report.Format do
 
   def describe({:possible_rename, table, x, y}),
     do: "possible_rename #{table}.#{x.name}->#{y.name}"
+
+  def describe({:change_primary_key, table, desired_pk, actual_pk}),
+    do: "change_primary_key #{table} #{inspect(actual_pk)}->#{inspect(desired_pk)}"
+
+  def describe({:change_fk, table, fk, _actual_fk}), do: "change_fk #{table}.#{fk.column}"
+
+  def describe({:change_index, table, idx, _actual_idx}), do: "change_index #{table}.#{idx.name}"
 end

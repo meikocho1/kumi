@@ -42,10 +42,10 @@ defmodule Kumi.Plan.FixHint do
   def lines({:add_index, _table, _idx} = op), do: code_ahead_lines(op)
   def lines({:change_column, _table, _col, _changes} = op), do: code_ahead_lines(op)
 
-  def lines({:drop_table, table}) do
+  def lines({:drop_table, _table} = op) do
     [
       "fix: to keep it, define it as an Ash resource (ash.codegen cannot see this drift)",
-      "to remove it: DROP TABLE #{table.name};"
+      remove_sql(op)
     ]
   end
 
@@ -76,6 +76,36 @@ defmodule Kumi.Plan.FixHint do
     [
       "fix: if this is a rename, run BEFORE ash.codegen (codegen would emit drop+add and lose data):",
       sql
+    ]
+  end
+
+  # No literal SQL here (SQL.render/1 is :unsupported for all three — a
+  # DROP+CREATE / DROP+ADD CONSTRAINT pair isn't one exact statement) — see
+  # `mix ash.codegen` for the code-ahead direction, and describe the
+  # drop/create pair in prose so a human can apply it deliberately.
+  def lines({:change_primary_key, _table, desired_pk, actual_pk}) do
+    [
+      "fix: #{@codegen}  (code ahead of DB)",
+      "if codegen emits nothing, primary key drifted (DB: #{inspect(actual_pk)}, code: #{inspect(desired_pk)}) — " <>
+        "changing it needs DROP CONSTRAINT <table>_pkey + ADD CONSTRAINT ... PRIMARY KEY (...); apply manually, verify data implications first"
+    ]
+  end
+
+  def lines({:change_fk, _table, desired_fk, actual_fk}) do
+    [
+      "fix: #{@codegen}  (code ahead of DB)",
+      "if codegen emits nothing, FK #{desired_fk.column} target drifted (DB: #{actual_fk.references_table}.#{actual_fk.references_column}, " <>
+        "code: #{desired_fk.references_table}.#{desired_fk.references_column}) — " <>
+        "needs DROP CONSTRAINT #{actual_fk.name} + ADD CONSTRAINT pointing at the new target; apply manually"
+    ]
+  end
+
+  def lines({:change_index, _table, desired_idx, actual_idx}) do
+    [
+      "fix: #{@codegen}  (code ahead of DB)",
+      "if codegen emits nothing, index #{desired_idx.name} definition drifted " <>
+        "(DB: columns #{inspect(actual_idx.columns)}, unique #{actual_idx.unique}; code: columns #{inspect(desired_idx.columns)}, unique #{desired_idx.unique}) — " <>
+        "needs DROP INDEX + CREATE INDEX; apply manually"
     ]
   end
 
