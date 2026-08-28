@@ -58,7 +58,7 @@ jobs:
         working-directory: ${{ matrix.package }}
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # Third-party actions are pinned to a commit SHA, not a tag: a tag can be
       # moved to point at different code, and this action runs with access to
