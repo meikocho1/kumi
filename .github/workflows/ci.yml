@@ -19,6 +19,11 @@ jobs:
     name: ${{ matrix.package }}
     runs-on: ubuntu-24.04
 
+    # Observed: ~6 min cold (empty cache), ~1 min warm. 20 gives generous
+    # headroom while still failing fast instead of sitting on GitHub's
+    # 6-hour default across all four matrix legs.
+    timeout-minutes: 20
+
     strategy:
       # One package failing must not hide the state of the other three —
       # a contributor should see every result from a single run.
@@ -55,9 +60,15 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # Third-party actions are pinned to a commit SHA, not a tag: a tag can be
+      # moved to point at different code, and this action runs with access to
+      # the checked-out tree. `actions/*` above are first-party and stay on
+      # major-version tags. Dependabot bumps this SHA and names the new version
+      # in its PR.
+      #
       # `.tool-versions` at the repo root is the single source of truth for
       # the toolchain — contributors' asdf/mise and CI read the same file.
-      - uses: erlef/setup-beam@v1
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
           version-file: .tool-versions
           version-type: strict

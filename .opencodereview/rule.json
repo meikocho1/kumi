@@ -1,0 +1,23 @@
+{
+  "rules": [
+    {
+      "path": "**/*_test.exs",
+      "rule": ".opencodereview/rules/elixir-test.md"
+    },
+    {
+      "path": "**/test/**/*.exs",
+      "rule": ".opencodereview/rules/elixir-test.md"
+    },
+    {
+      "path": "**/*.{ex,exs,heex}",
+      "rule": ".opencodereview/rules/elixir-ash.md"
+    }
+  ],
+  "exclude": [
+    "**/deps/**",
+    "**/_build/**",
+    "**/priv/static/**",
+    "**/.elixir_ls/**",
+    "design/**"
+  ]
+}
