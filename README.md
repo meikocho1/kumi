@@ -43,10 +43,29 @@ These are settled design decisions, not gaps:
 
 ## Quick look
 
-```bash
-# Start a new project — Ash, Phoenix, authentication, admin, database.
-mix kumi.new my_crm
+Kumi is not on Hex yet, so `mix kumi.new` comes from a locally built
+archive and needs `--kumi-path` pointing at this checkout. Run this from
+the directory *above* your Kumi clone:
 
+```bash
+mix archive.install hex igniter_new
+mix archive.install hex phx_new
+(cd Kumi/kumi_new && mix archive.build && mix archive.install)  # confirms [Yn]
+
+# Start a new project — Ash, Phoenix, authentication, admin, database.
+mix kumi.new my_crm --kumi-path Kumi --db-port 5434
+```
+
+(Once Kumi ships to Hex, `--kumi-path` and the archive build both go away.)
+
+`--kumi-path` must be the checkout's *real* path — pass a symlink to it and
+Mix rejects the generated project with "the dependency kumi in mix.exs is
+overriding a child dependency", because the absolute path written into your
+`mix.exs` no longer matches the `../kumi` that `kumi_admin` declares.
+
+Then, from inside `my_crm/`:
+
+```bash
 # What does my database actually look like, versus my code?
 mix kumi.plan
 #   SAFE       add_column accounts.industry (text, nullable)
@@ -57,13 +76,21 @@ mix kumi.plan
 mix kumi.apply
 
 # What does this shorthand resource really compile to?
-mix kumi.expand MyApp.Core.Account
+mix kumi.expand MyCrm.Core.Account
 ```
+
+Adding Kumi to an **existing** app instead? See
+[`kumi/README.md`](kumi/README.md#existing-app).
 
 ## Documentation
 
 - **[`kumi/README.md`](kumi/README.md)** — install, the plan engine, the
   DSLs, every mix task.
+- **[`kumi_admin/README.md`](kumi_admin/README.md)** — mounting the admin,
+  every router option, and the two things that bite newcomers (no auth of
+  its own; every managed resource needs an `:id` primary key).
+- **[`kumi_storage/README.md`](kumi_storage/README.md)** — uploads: install,
+  the `:image` field, validation defaults, the backend contract.
 - **[`kumi/guides/mini-crm.md`](kumi/guides/mini-crm.md)** — build a
   small CRM end to end. Every snippet in it was executed.
 - **[`kumi/guides/api.md`](kumi/guides/api.md)** — adding a JSON:API when
