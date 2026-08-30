@@ -68,12 +68,32 @@ release, not a re-tag.
 
 ## Publishing to Hex
 
-Not yet possible — see the checklist below. Once a license is chosen,
-each package needs a `package/0` in its `mix.exs` (description, licenses,
-links, `files`) and `:ex_doc` as a dev dependency. Deliberately not
-stubbed out now: incomplete Hex metadata makes `mix hex.build` fail in a
-confusing way, and a wrong license in a published package is very hard to
-walk back.
+Every package now carries `package/0` metadata (MIT, description, links,
+`files`) and builds a valid tarball — verified with `mix hex.build` in all
+four. Two things about that are non-obvious:
+
+**`KUMI_PUBLISH=1`.** `mix hex.build` refuses any non-Hex dependency, and
+`kumi_admin`/`kumi_storage` depend on `kumi` by path during development.
+Their `kumi_dep/0` returns `{:kumi, path: "../kumi"}` normally and
+`{:kumi, "~> 0.1"}` when `KUMI_PUBLISH` is set. Every publish command for
+those two packages must set it:
+
+```bash
+(cd kumi        && mix hex.publish)
+(cd kumi_admin  && KUMI_PUBLISH=1 mix hex.publish)
+(cd kumi_storage && KUMI_PUBLISH=1 mix hex.publish)
+(cd kumi_new    && mix hex.publish package)   # package only — see below
+```
+
+**`kumi_new` publishes without docs.** It has no dependencies at all, not
+even `:ex_doc`, because `mix archive.build` compiles in `:dev` — a single
+unfetched dev dependency would break `mix archive.install` for anyone who
+had not run `mix deps.get` in that directory first. Keeping the package
+dependency-free is worth more than its hexdocs page, so publish it with
+`mix hex.publish package`.
+
+Package names on Hex were unclaimed when this was written; claiming them
+is the irreversible step.
 
 Publish order matters, because the dependents require the core from Hex:
 `kumi` → then `kumi_admin` and `kumi_storage` → `kumi_new` last (it has
@@ -88,36 +108,40 @@ repository.
 These are decisions, not tasks — they need a human, and several block
 each other.
 
-- [ ] **Project name.** "Kumi" is the working name and appears in module
-      names, mix task names, package names, the generated app's chrome,
-      and every guide. Changing it later is a mechanical but wide rename,
-      and it becomes irreversible the moment the Hex package names are
-      claimed. Decide before the first publish, not before the first push.
-- [ ] **License.** Blocks Hex publishing entirely and determines whether
-      anyone can legally use the code. Needs a `LICENSE` file at the repo
-      root and a matching `licenses:` entry in each package's Hex
-      metadata.
+Settled on 2026-08-30, with what was done for each:
+
+- [x] **Project name — "Kumi", final.** All four Hex names
+      (`kumi`, `kumi_admin`, `kumi_new`, `kumi_storage`) were unclaimed
+      when checked. Nothing was renamed.
+- [x] **License — MIT.** `LICENSE` at the repo root and a copy in each
+      package (Hex packages cannot include files above their own root).
+      `licenses: ["MIT"]` in all four `package/0`. The copyright line
+      reads "Kumi contributors" — change it before the first tag if a
+      named holder is wanted.
+- [x] **`kumi_storage` ships in the first release.** Four packages,
+      lockstep, as the versioning policy above already assumed.
+- [x] **Private documents — removed from `main`, history untouched.** The
+      three blueprints and the friction log are now in `.gitignore` and
+      untracked; the files stay on the working copy. Earlier versions
+      remain reachable in git history, which was the accepted trade.
+- [x] **`CLAUDE.md`** was rewritten as public English contributor and
+      agent guidance. The internal-only parts moved to a gitignored
+      `CLAUDE.local.md`.
+
+Still open:
+
 - [ ] **First version number.** Every `mix.exs` says `0.1.0` while the
       commit history talks about v0.1 through v0.5. Pick the real number
       at the first tag and make all four files agree.
-- [ ] **Private documents.** The blueprint documents and the internal
-      friction log are working notes, in Japanese, and are not intended
-      to be published. Decide per file: delete, move out of the
-      repository, or keep deliberately. Note that removing them from
-      `main` does **not** remove them from history — if that matters,
-      it has to happen before the repository's visibility changes.
-- [ ] **`CLAUDE.md`.** Currently an internal working-instructions file.
-      Either rewrite it as public contributor guidance or remove it.
-- [ ] **`kumi_storage`'s public status.** It is tested by CI and
-      documented here, but whether it ships in the first public release
-      or stays internal is undecided.
 - [ ] **Code of conduct.** Standard practice for a public repository, and
       a real one needs a real reporting contact. Adding a Contributor
       Covenant file with an unfilled contact placeholder is worse than
       not having one.
 - [ ] **Design assets.** The logo and brand notes under `design/` are
-      committed. Confirm they're intended to be public, and whether they
-      carry the same license as the code (usually they shouldn't).
+      committed, and the root `README.md` now embeds the logo and a
+      screenshot — which assumes they're public. Confirm that, and decide
+      whether they carry the same license as the code (usually they
+      shouldn't).
 
 ## After the repository goes public
 

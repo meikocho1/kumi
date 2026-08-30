@@ -130,6 +130,8 @@ Hint     = AshPostgres snapshots (history; rename disambiguation only)
 
 See [guides/ash-gotchas.md](guides/ash-gotchas.md) for Ash/Spark/AshPostgres/Igniter gotchas found while building Kumi.
 
+See [guides/auth.md](guides/auth.md) for sign-in strategies, multi-provider (Google/GitHub/OIDC) setup, and two-factor auth.
+
 See [guides/mini-crm.md](guides/mini-crm.md) for a from-scratch walkthrough building a CRM with Kumi and official Ash libraries.
 
 ## Development
@@ -153,4 +155,4 @@ paths to production.
 
 ## License
 
-TBD (Apache-2.0 planned; final decision pending trademark/name checks).
+MIT — see [`LICENSE`](LICENSE).

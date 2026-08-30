@@ -7,7 +7,7 @@ fastest, safest place for the frontend is the same app kumi_admin lives in
 guide is that path. Every command and response below was actually run
 against a real app and a real database — nothing here is hypothetical.
 
-**The policy this guide implements** (blueprint §9): Kumi does not build an
+**The policy this guide implements**: Kumi does not build an
 API layer. `AshJsonApi` is already a complete, proven library — wrapping it
 would violate the "no thin wrappers" rule the same way a Kumi ORM would
 violate D2. Kumi's job is to show the path, honestly, including where it's

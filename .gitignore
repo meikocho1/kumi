@@ -6,3 +6,17 @@ spikes/chat_ops/
 
 # browser-automation scratch output
 .playwright-mcp/
+
+# hex build artifacts
+*.tar
+doc/
+
+# internal working notes — kept on disk, out of the public repository.
+# Removing them here does not remove them from git history; that was a
+# deliberate call (see RELEASING.md).
+KUMI_PROJECT_BLUEPRINT_v1.md
+KUMI_PROJECT_BLUEPRINT_v2.md
+KUMI_PROJECT_BLUEPRINT_v3.md
+spikes/FRICTION_LOG.md
+CLAUDE.local.md
+LAUNCH.md

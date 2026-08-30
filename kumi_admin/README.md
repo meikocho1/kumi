@@ -114,4 +114,4 @@ for.
 
 ## License
 
-TBD (Apache-2.0 planned; final decision pending trademark/name checks).
+MIT — see [`LICENSE`](LICENSE).

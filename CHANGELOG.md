@@ -99,7 +99,24 @@ tag they collapse into that version's section.
   database setup, and a themed starting page.
 - Module selection at generation time, so you choose which optional
   modules (for example storage) the new project starts with.
+- `--auth-strategy` selects which `ash_authentication` strategies the new
+  project is generated with (`password`, `magic_link`, `api_key`, comma
+  separated; default `password`). Values the upstream installer cannot
+  generate are rejected before generation starts rather than failing
+  part-way through.
+- The generated sign-in page styles OAuth provider buttons to match the
+  rest of the page, so adding Google or GitHub by hand does not leave an
+  off-brand button behind.
 - No runtime dependencies, so it stays installable as a mix archive.
+
+**Packaging**
+
+- MIT licensed. `LICENSE` at the repository root and in each package.
+- All four packages carry Hex metadata and produce a valid tarball
+  (`mix hex.build`). `kumi_admin` and `kumi_storage` swap their path
+  dependency on `kumi` for a version requirement when `KUMI_PUBLISH` is
+  set; `kumi_new` stays dependency-free so it remains installable as a
+  mix archive.
 
 ### Fixed
 

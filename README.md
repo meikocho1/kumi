@@ -1,16 +1,66 @@
-# Kumi
+<p align="center">
+  <img src="design/kumi-logo.svg" alt="Kumi" width="88" height="88">
+</p>
 
-> Ash helps you model your application. Kumi helps you ship it as a
-> product.
+<h1 align="center">Kumi</h1>
 
-Kumi is an application platform for [Ash](https://ash-hq.org) and
-Phoenix. You define your resources in code; Kumi gives you a real admin
-UI, a login flow, safe database plans, and a one-command generator to
-start from — without hiding Ash from you at any point.
+<p align="center">
+  <strong>Ash helps you model your application. Kumi helps you ship it as a product.</strong>
+</p>
 
-**Status: pre-release.** Nothing is published to Hex yet, the name and
-license are not settled, and APIs will change. See `RELEASING.md` for
-what's blocking a public release.
+<p align="center">
+  <a href="https://github.com/meikocho1/kumi/actions/workflows/ci.yml"><img src="https://github.com/meikocho1/kumi/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT"></a>
+  <img src="https://img.shields.io/badge/elixir-~%3E%201.20-purple.svg" alt="Elixir">
+</p>
+
+Kumi is an application platform for [Ash](https://ash-hq.org) and Phoenix.
+You define your resources in code; Kumi gives you a real admin UI, a login
+flow, safe database plans, and a one-command generator to start from —
+without hiding Ash from you at any point.
+
+## The 30-second version
+
+**Your migrations tell you what your code did. They don't tell you what your
+database *is*.** `mix ash.codegen` compares your code to its own snapshots.
+Kumi compares your code to the live database, and classifies every
+difference by whether it can lose data:
+
+```text
+crm_accounts:
+  + column notes text  [SAFE: adds nullable column notes]
+  ~ column industry (nullable: true -> false)  [REVIEW: tightens industry to NOT NULL — existing NULLs would fail]
+  - column legacy_notes text  (in DB, not in code — drift)  [DANGEROUS: drops column legacy_notes — data loss]
+
+1 safe / 1 review / 1 dangerous
+```
+
+That column someone added by hand in production, three months ago, that
+nobody wrote down? `ash.codegen` cannot see it. This is the whole point.
+`mix kumi.plan --check` puts it in CI, and `mix kumi.apply` repairs the
+SAFE subset in dev — never the rest.
+
+Then, because your resources are already declared, you get the rest of the
+product shell for free:
+
+<p align="center">
+  <img src="design/screenshots/kumi-detail-atomic-child.png" alt="A Kumi admin record page — attributes, an enum stage badge, and resolved belongs_to relations — generated from Ash resources with no per-resource code" width="860">
+</p>
+
+Tables, forms, search, `belongs_to` selects, child tables, dashboard
+metrics and workflow stages — derived from the resources you already
+wrote, with **no per-resource admin code**, and no authentication of its
+own: it sits behind whatever your app already uses
+([Google, GitHub, OIDC and friends](kumi/guides/auth.md)).
+
+## How is this different from `ash_admin`?
+
+`ash_admin` is a developer's inspector for your data — excellent at that,
+and deliberately generic. Kumi is aimed at the thing you hand to a
+non-developer: an app-level DSL where *you* declare the navigation,
+dashboard metrics and workflow stages, plus the plan engine and the
+generator around it. If you want to browse your resources in dev, use
+`ash_admin`. If you want the admin to be the product, that's this.
 
 ## What's in here
 
@@ -22,6 +72,10 @@ Four independent mix packages, released together:
 | **[`kumi_admin/`](kumi_admin/)** | A LiveView admin derived from your resources — tables, forms, search, `belongs_to` selects, child tables, dashboard metrics, workflow stages. No per-resource code, and no authentication of its own: it sits behind whatever your app already uses. |
 | **[`kumi_storage/`](kumi_storage/)** | Uploads, as an installable module. Generates a plain Ash resource with an `:upload` action; the admin picks it up automatically. |
 | **[`kumi_new/`](kumi_new/)** | `mix kumi.new my_app` — from nothing to a running application with an admin and a login screen, in one command. |
+
+**Status: pre-release.** MIT licensed and buildable today, but nothing is
+published to Hex yet and APIs will change before the first tag. See
+[`RELEASING.md`](RELEASING.md) for what's left.
 
 ## Three things Kumi will not do
 
@@ -95,6 +149,9 @@ Adding Kumi to an **existing** app instead? See
   small CRM end to end. Every snippet in it was executed.
 - **[`kumi/guides/api.md`](kumi/guides/api.md)** — adding a JSON:API when
   you need one, and how relationship depth works.
+- **[`kumi/guides/auth.md`](kumi/guides/auth.md)** — sign-in strategies,
+  adding Google/GitHub/OIDC providers, and where two-factor auth actually
+  has to come from.
 - **[`kumi/guides/frontend.md`](kumi/guides/frontend.md)** — putting your
   public-facing frontend on the same Phoenix app as the admin, including
   the security headers that will otherwise silently break embedding.
@@ -116,5 +173,4 @@ reporting instead: **[`SECURITY.md`](SECURITY.md)**.
 
 ## License
 
-Not yet chosen. Until a `LICENSE` file exists, no usage rights are
-granted — please don't build on this yet.
+MIT — see [`LICENSE`](LICENSE).

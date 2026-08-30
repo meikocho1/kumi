@@ -3,12 +3,12 @@
 Kumi gave you an admin. You also want a public-facing part of the same
 Phoenix app — a marketing page, an embeddable widget, anything a visitor with
 no login hits directly. This guide answers "how", using the actual working
-example in `spikes/chat_ops`: an embeddable chat widget, its `/embed.js`
+example app used to write it — an online-ops chat product with an embeddable chat widget, its `/embed.js`
 snippet-injector, and the no-actor Ash policies that let an anonymous visitor
 write data safely. Nothing here is hypothetical — every command and header
 shown below was actually run against a live server.
 
-Per the blueprint (§9, "API・フロント・examplesの方針"): Kumi does not build a
+A settled decision: Kumi does not build a
 frontend framework or an API layer of its own — that would be exactly the
 kind of thin wrapper the project avoids. Phoenix and LiveView already do this
 job; Kumi's job is to document the pattern for coexisting with `kumi_admin`
@@ -295,7 +295,7 @@ the exempt `:embed_js` pipeline (see the table below); it did **not**
 reproduce the 403 itself (that would require routing the same request
 through the plain `:browser` pipeline instead, which the running app
 never does) — take the 403 claim as inherited from the router's own comment
-and from F111 in the friction log, not as re-verified in this session.
+not as re-verified in this session.
 
 ### 4b. Framing controls block the customer-site iframe — and the header you'll reach for is the wrong one
 
