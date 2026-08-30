@@ -60,8 +60,8 @@ the backend is called — backends do not validate.
 ## Backends
 
 `KumiStorage.Backend` is the behaviour; `KumiStorage.Backend.Local`
-(filesystem) is the only v1 implementation. An S3 backend is a committed
-follow-up, not a speculative abstraction.
+(filesystem) is the only v1 implementation. An S3 backend is a
+planned follow-up rather than a speculative abstraction.
 
 Every callback takes `opts` explicitly — backends never read Application
 config themselves. `KumiStorage.Plug` is the config-reading boundary: it

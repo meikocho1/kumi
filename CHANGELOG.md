@@ -125,7 +125,7 @@ tag they collapse into that version's section.
 - The generated sign-in page styles OAuth provider buttons to match the
   rest of the page, so adding Google or GitHub by hand does not leave an
   off-brand button behind.
-- No runtime dependencies, so it stays installable as a mix archive.
+- No runtime dependencies, so it stays installable as a Mix archive.
 
 **Packaging**
 
@@ -134,7 +134,7 @@ tag they collapse into that version's section.
   (`mix hex.build`). `kumi_admin` and `kumi_storage` swap their path
   dependency on `kumi` for a version requirement when `KUMI_PUBLISH` is
   set; `kumi_new` stays dependency-free so it remains installable as a
-  mix archive.
+  Mix archive.
 
 ### Fixed
 

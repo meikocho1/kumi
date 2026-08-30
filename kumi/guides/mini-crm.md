@@ -2,8 +2,9 @@
 
 This is a from-scratch walkthrough: generate a Phoenix+Ash app, add two
 resources, wire them into an admin UI with a sales pipeline and a dashboard,
-then exercise Kumi's schema-drift loop against a real database. Every command
-and output below was actually run — nothing here is hypothetical.
+then exercise Kumi's schema-drift loop against a real database. Every command below
+was actually run, and every output is what it printed — nothing here is
+hypothetical.
 
 **What Kumi is, in three lines**: Kumi is a thin layer over Ash. The
 `Kumi.Resource` shorthand compiles to a real, inspectable Ash resource (you
@@ -25,8 +26,9 @@ directory.
 
 ## Prerequisites
 
-Postgres reachable, and Kumi not yet published to Hex (same caveat as the
-main README) so you install its generator archive from source once:
+You need Postgres reachable. Kumi isn't published to Hex yet (same caveat
+as the main README), so you install its generator archive from source
+once:
 
 ```bash
 mix archive.install hex igniter_new
@@ -480,7 +482,7 @@ cover yet — this is the roadmap, not an apology:
   :avatar, :image, to: ...` plus `mix kumi_storage.install` gets you a real
   file input in kumi_admin's generated forms, with zero new deps on
   kumi_admin's side. What's still deferred, deliberately: only a local
-  filesystem backend ships (an S3 backend is a committed follow-up, not
+  filesystem backend ships (an S3 backend is a planned follow-up, not
   built yet); replacing an attachment leaves the old record and file as an
   orphan (no sweep job); and there's no thumbnail/resize pipeline — the
   form and detail page link to the original file only.

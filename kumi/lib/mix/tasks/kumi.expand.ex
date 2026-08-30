@@ -2,8 +2,8 @@ defmodule Mix.Tasks.Kumi.Expand do
   @moduledoc """
   Prints the Ash resource source a `Kumi.Resource` shorthand module
   compiles to — the "Show Ash" expansion (blueprint §0 D1). This is not a
-  re-derivation: it prints exactly the string `Kumi.Resource` itself
-  compiled from (`Kumi.Resource.Codegen.generate/3`), so it can never
+  re-derivation: it prints exactly the string that `Kumi.Resource`
+  itself compiled from (`Kumi.Resource.Codegen.generate/3`), so it can never
   drift from what actually runs.
 
       mix kumi.expand MyApp.Customer

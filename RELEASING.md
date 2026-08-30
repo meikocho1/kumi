@@ -9,7 +9,7 @@ see `CONTRIBUTING.md`.
 (lockstep).** `kumi`, `kumi_admin`, `kumi_storage` and `kumi_new` are
 always tagged and published at the same version.
 
-Why lockstep, given they're independent mix projects:
+Why lockstep, given they're independent Mix projects:
 
 - `kumi_admin` and `kumi_storage` depend on `kumi`, and during
   development they do it by path. At publish time each path dependency
@@ -146,7 +146,7 @@ Still open:
 ## After the repository goes public
 
 Repository settings, not files — nothing in this repo can enforce them,
-so they're listed here so they don't get forgotten:
+so they are written down here to keep them from being forgotten:
 
 ```bash
 # Require CI to pass and a review before merging to main.

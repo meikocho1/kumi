@@ -15,9 +15,9 @@ defmodule Mix.Tasks.Kumi.Gen.Auth.Docs do
 
     `mix ash_authentication.add_strategy` can generate `password`,
     `magic_link` and `api_key`. The OAuth2 providers have no installer
-    upstream — they are hand-written DSL, and the hand-written part is
-    the same four moving pieces every time. This task writes those pieces
-    as ordinary Ash source you can read and edit (D1 "Show Ash"), using
+    upstream — they are hand-written DSL, and it is the same four moving
+    pieces every time. This task writes those pieces as ordinary Ash
+    source you can read and edit (D1 "Show Ash"), using
     `AshAuthentication`'s own public codemods to do it.
 
     ## Providers
@@ -290,8 +290,8 @@ if Code.ensure_loaded?(Igniter) do
       case Ash.Resource.Igniter.defines_attribute(igniter, opts[:user], :hashed_password) do
         {igniter, true} ->
           Igniter.add_notice(igniter, """
-          One edit left in #{inspect(opts[:user])} — you keep the password
-          strategy, and a user who signs in with a provider has no password:
+          One edit left in #{inspect(opts[:user])} — if you keep the password
+          strategy, a user who signs in with a provider has no password:
 
               attribute :hashed_password, :string, allow_nil?: true, sensitive?: true
 

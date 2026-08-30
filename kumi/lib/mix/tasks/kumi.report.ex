@@ -1,9 +1,9 @@
 defmodule Mix.Tasks.Kumi.Report do
   @moduledoc """
   The verification harness of the AI patch pipeline (blueprint §8): an AI
-  agent (external to Kumi — Kumi never embeds one) patches source, then
-  this task runs the full validation chain and emits a machine-readable
-  verdict for "is this Ready for PR".
+  agent (external to Kumi — Kumi never embeds one) patches source; this
+  task then runs the full validation chain and emits a machine-readable
+  verdict for "is this ready for PR?".
 
       mix kumi.report               # human-readable checklist
       mix kumi.report --json        # machine-readable JSON on stdout (see

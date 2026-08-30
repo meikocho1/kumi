@@ -12,8 +12,8 @@ which minor versions are supported and for how long.
 
 Use GitHub's private vulnerability reporting on this repository:
 **Security → Report a vulnerability**. That opens a private thread
-visible only to the maintainers, and it works without you needing an
-email address for anyone.
+visible only to the maintainers, and it works without anyone having to
+publish an email address.
 
 Please include:
 
@@ -52,9 +52,9 @@ If you're looking for where the interesting surface is:
 
 ## Out of scope
 
-- Findings that require an already-compromised developer machine, or
-  running `mix kumi.apply` in production against the explicit
-  `MIX_ENV=dev` guard.
+- Findings that require an already-compromised developer machine, or that
+  require defeating the `MIX_ENV=dev` guard to run `mix kumi.apply` in
+  production.
 - Vulnerabilities in Ash, AshPostgres, Phoenix, or Postgres themselves —
   please report those upstream. We're glad to hear about them anyway if
   Kumi's usage makes them materially worse.

@@ -9,7 +9,7 @@ experience that sits behind whatever your app already uses.
 
 ## Install
 
-Not on Hex yet, so use a path dependency plus the installer:
+kumi_admin isn't on Hex yet, so use a path dependency plus the installer:
 
 ```elixir
 # mix.exs
@@ -48,7 +48,7 @@ Options (see `KumiAdmin.Router` for the full list):
 | Option | Default | What it does |
 |---|---|---|
 | `:app` | — | **Required.** The `Kumi.App` module to render. |
-| `:on_mount` | `[]` | Hooks run before every admin LiveView. Populate whatever assign `:actor` reads — kumi_admin authenticates nobody itself. |
+| `:on_mount` | `[]` | Hooks that run before every admin LiveView. Populate whatever assign `:actor` reads — kumi_admin authenticates nobody itself. |
 | `:actor` | `{KumiAdmin.Actor, :from_current_user}` | `{Module, :function}` resolving the Ash actor from the mounted socket. |
 | `:sign_in_path` / `:sign_out_path` / `:register_path` | `/sign-in`, `/sign-out`, `/register` | Point these at your app's real routes. kumi_admin implements none of them. |
 | `:user_resource` | `nil` | When set, an actor-less mount redirects to `:register_path` instead of `:sign_in_path` if this resource has zero records — "create the first user" onboarding. |
@@ -92,8 +92,8 @@ tested against a real host app.
 ## Walkthrough
 
 [`kumi/guides/mini-crm.md`](../kumi/guides/mini-crm.md) builds a CRM from
-scratch — resources, admin, pipeline, dashboard. Every command in it was
-executed.
+scratch — resources, admin, pipeline, dashboard. Every command in it has
+been run.
 
 ## Development
 

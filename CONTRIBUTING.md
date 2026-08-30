@@ -29,12 +29,12 @@ knowing them saves you writing a PR that can't be merged as-is:
    Ash or by generating something `kumi.expand` can't print doesn't fit.
 2. **Ash/AshPostgres is the only compile target.** There is no Ecto
    adapter and no persistence abstraction layer. Please don't add one.
-3. **Schema diffing complements `mix ash.codegen`, it doesn't replace
+3. **Schema diffing complements `mix ash.codegen`; it doesn't replace
    it.** `mix kumi.plan` compares your code against a *live* database,
    which is a different question from the code-vs-snapshot question
    `ash.codegen` answers. Both are meant to be used.
 4. **`kumi_new` has no runtime dependencies** and must stay installable
-   as a mix archive. Adding a dependency to it breaks that.
+   as a Mix archive. Adding a dependency to it breaks that.
 
 Everything else is open: bug fixes, new admin capabilities, new modules,
 docs, guides, better error messages. If you want to change one of the
@@ -44,7 +44,7 @@ diff.
 
 ## Repository layout
 
-This is a monorepo of four independent mix projects:
+This is a monorepo of four independent Mix projects:
 
 | Directory | What it is | Dependencies |
 |---|---|---|

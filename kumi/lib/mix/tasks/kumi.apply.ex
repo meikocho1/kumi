@@ -19,7 +19,7 @@ defmodule Mix.Tasks.Kumi.Apply do
       mix kumi.apply --app MyApp.App  # app-scoped plan (like `mix kumi.plan --app`)
       mix kumi.apply --yes            # skip the confirmation prompt
 
-  Dev-only: refuses outside `MIX_ENV=dev` (`Kumi.Apply` itself takes no
+  Dev-only: refuses to run outside `MIX_ENV=dev` (`Kumi.Apply` itself takes no
   Mix/env stance — the guard lives here so the core stays testable under
   `:test`).
   """

@@ -78,7 +78,7 @@ This is deliberately different from `mix ash.codegen` (code-vs-snapshot): Kumi s
 
 ### kumi_admin
 
-Consumes `Kumi.App.Info` (navigation drives the sidebar with zero host code). Has **no auth of its own**: the router macro (`kumi_admin/2`, session-MFA pattern copied from ash_admin) takes the host's `on_mount` hooks and an `actor: {M, f}` (default reads `socket.assigns.current_user`). Policy-forbidden reads render an honest empty state, never a crash. New/Edit/Delete buttons are gated by `Ash.can?` (fail-open to the flash path). Column/widget derivation is pure (`Columns`, `FormFields`, `Search`) and unit-tested in the package; LiveView behavior is tested against a real host application.
+Consumes `Kumi.App.Info` (navigation drives the sidebar with zero host code). Has **no auth of its own**: the router macro (`kumi_admin/2`, session-MFA pattern copied from ash_admin) takes the host's `on_mount` hooks and an `actor: {M, f}` (default reads `socket.assigns.current_user`). Policy-forbidden reads render an honest empty state, never a crash. New/Edit/Delete buttons are gated by `Ash.can?` (fail-open to the flash path). Column/widget derivation is pure (`Columns`, `FormFields`, `Search`) and unit-tested in the package; LiveView behaviour is tested against a real host application.
 
 ## Hard-won gotchas (all verified in this repo)
 

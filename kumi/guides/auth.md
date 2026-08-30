@@ -5,9 +5,9 @@ post-login shell: it reads an actor out of the socket your app already
 populated and gates every LiveView on it (`KumiAdmin.Gate`,
 `KumiAdmin.Actor`). Authentication itself is
 [`ash_authentication`](https://hexdocs.pm/ash_authentication) — a complete,
-maintained library — and wrapping it would break the same "no thin
-wrappers" rule that keeps Kumi out of the ORM and API business — the same
-settled decision as D1 "Show Ash".
+maintained library. Wrapping it would break the same "no thin wrappers"
+rule that keeps Kumi out of the ORM and API business, which is the
+settled decision behind D1 "Show Ash".
 
 So this guide is not "Kumi's auth". It is: what `mix kumi.new` wires for
 you, what it deliberately doesn't, and the exact path from there to
@@ -51,7 +51,7 @@ mix ash.migrate
 (`AshAuthentication.Strategy.Google` and siblings), but
 `mix ash_authentication.add_strategy` only generates `password`,
 `magic_link` and `api_key` — the OAuth2 providers are hand-written DSL
-upstream, and the hand-written part is the same four pieces every time.
+upstream, and it is the same four pieces every time.
 
 Kumi generates those four pieces:
 

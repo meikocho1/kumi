@@ -4,8 +4,9 @@ Kumi is integration-first, not headless-first: for a Phoenix/LiveView app the
 fastest, safest place for the frontend is the same app kumi_admin lives in
 (see `kumi/guides/frontend.md`). But sometimes you genuinely need a JSON API
 — a mobile client, a third-party integration, a headless frontend team. This
-guide is that path. Every command and response below was actually run
-against a real app and a real database — nothing here is hypothetical.
+guide is that path. Every command below was actually run against a
+real app and a real database, and every response is what came back —
+nothing here is hypothetical.
 
 **The policy this guide implements**: Kumi does not build an
 API layer. `AshJsonApi` is already a complete, proven library — wrapping it
@@ -15,9 +16,9 @@ rougher than the happy path suggests.
 
 **What you'll build**: a `Contact` resource and a `Deal` resource (`Deal
 belongs_to Contact`, `Contact has_many Deal`), both exposed over JSON:API,
-with a working `?include=` in both directions and one gotcha you will
-absolutely hit resolved for you: JSON:API's own content type gets rejected by
-a stock Phoenix `:accepts` pipeline.
+with a working `?include=` in both directions, and a fix for the gotcha you
+will absolutely hit: JSON:API's own content type gets rejected by a stock
+Phoenix `:accepts` pipeline.
 
 ## Step 0 — The honest framing: shorthand doesn't do this, and that's intentional
 
@@ -116,7 +117,7 @@ mix deps.get
 
 ## Step 2 — Convert Contact to plain Ash and add `AshJsonApi.Resource`
 
-Take the `mix kumi.expand` output verbatim and add four things: the
+Take the `mix kumi.expand` output verbatim and add three things: the
 extension, the `json_api` block (with an explicit `includes` list — this
 part is easy to skip and then wonder why `?include=` 400s), and
 `public?: true` on the `has_many :deals` relationship (the expand output
@@ -317,9 +318,9 @@ HTTP_STATUS:406
 ```
 
 `application/vnd.api+json` isn't a MIME type Phoenix's `:accepts` plug
-recognizes out of the box. Register it as an alias for `"json"` (add this
-before `AshJsonApi.Plug.Parser` will do any good, and before your first
-request — a stale `:mime` build won't pick up the new mapping until it's
+recognizes out of the box. Register it as an alias for `"json"` (you have to
+add this before `AshJsonApi.Plug.Parser` will do any good, and before your
+first request — a stale `:mime` build won't pick up the new mapping until it's
 rebuilt):
 
 ```elixir
@@ -446,7 +447,7 @@ HTTP_STATUS:200
 Before adding the nested form, the flat `includes([:deals])` from Step 2's
 first draft returned a **400** for this exact same URL
 (`{"code":"invalid_includes","detail":"Invalid includes:
-[[\"deals\",\"contact\"]]"}`) — the real answer to "how deep can I go" is: as
+[[\"deals\",\"contact\"]]"}`) — the real answer to "how deep can I go?" is: as
 deep as the *root* resource's `includes` keyword list nests, not something
 each resource along the path declares independently.
 
@@ -469,8 +470,8 @@ generic tooling). It does **not** automatically accept the relationship
 write payload needs. Sending `relationships.contact` against an action that
 doesn't accept it raises `Ash.Error.Invalid.NoSuchInput` — and in
 `ash_json_api` 1.7.1 that specific error's own formatter has a bug
-(`Protocol.UndefinedError: Enumerable not implemented for Atom`, filed
-upstream-worthy, not something this guide works around), so what you see is
+(`Protocol.UndefinedError: Enumerable not implemented for Atom`, worth
+filing upstream, not something this guide works around), so what you see is
 a raw 500 instead of a clean 4xx. **Workaround used above**: send the foreign
 key directly under `attributes` (`attributes.contact_id`), which the default
 action already accepts. **The real fix**, if you want `relationships` writes

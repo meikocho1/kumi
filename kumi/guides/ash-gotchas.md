@@ -1,12 +1,12 @@
 # Ash/Spark/AshPostgres/Igniter Gotchas
 
-A collection of non-obvious behaviors, undocumented internals, and landmines
+A collection of non-obvious behaviours, undocumented internals, and landmines
 encountered while building a schema-diffing tool, an application-level DSL,
 a custom admin UI, and a project generator on top of Ash. Each entry cost
-someone real debugging time; the goal here is that it costs you less.
+someone real debugging time; the goal here is that they cost you less.
 Verified against the Ash/AshPostgres/Spark/Igniter versions pinned in this
 project's `mix.lock` at the time of writing (Ash 3.32, AshPostgres 2.12,
-Spark 2.7, Igniter 0.8) — upstream behavior may have changed since.
+Spark 2.7, Igniter 0.8) — upstream behaviour may have changed since.
 
 ## Ash resources & policies
 
@@ -279,7 +279,8 @@ embedded quotes:
 def quote_ident(name), do: "\"" <> String.replace(name, "\"", "\"\"") <> "\""
 ```
 
-Centralize this in one function everywhere query strings are assembled;
+Centralize this in one function and call it everywhere query strings are
+assembled;
 scattering ad hoc interpolation across each query type means only one of
 them needs to forget quoting to reintroduce the bug.
 
@@ -309,7 +310,7 @@ inject a `# TODO` comment into their file — use
 body instead. Untouched files also make idempotency trivial: nothing to
 diff against, so a second run just prints the same notice again.
 
-**A module existing doesn't mean it has the specific behavior you're relying on — verify the actual AST.**
+**A module existing doesn't mean it has the specific behaviour you're relying on — verify the actual AST.**
 Before auto-wiring against a convention (e.g. "if `MyAppWeb.LiveUserAuth`
 exists, assume it exports an `on_mount(:current_user, ...)` clause and
 mount against it"), check that the clause is actually present, not just
@@ -371,7 +372,7 @@ generated app expecting Kumi to be at fault.
 A component that embeds its own stylesheet with `<style>{css()}</style>`
 compiles cleanly and every test passes — but the browser receives the
 literal text `{css()}` as its CSS, so the page renders completely
-unstyled. This is documented HEEx behavior (curly interpolation is off
+unstyled. This is documented HEEx behaviour (curly interpolation is off
 inside `style`/`script`); the escape hatch is the EEx form:
 
 ```heex

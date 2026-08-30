@@ -2,11 +2,11 @@
 
 Kumi gave you an admin. You also want a public-facing part of the same
 Phoenix app — a marketing page, an embeddable widget, anything a visitor with
-no login hits directly. This guide answers "how", using the actual working
-example app used to write it — an online-ops chat product with an embeddable chat widget, its `/embed.js`
-snippet-injector, and the no-actor Ash policies that let an anonymous visitor
-write data safely. Nothing here is hypothetical — every command and header
-shown below was actually run against a live server.
+no login hits directly. This guide answers "how", using the working app it was
+written against — an online-ops chat product with an embeddable chat
+widget, its `/embed.js` snippet-injector, and the no-actor Ash policies that let an anonymous visitor
+write data safely. Nothing here is hypothetical: every command below was run against a live
+server, and every header shown is what that server returned.
 
 A settled decision: Kumi does not build a
 frontend framework or an API layer of its own — that would be exactly the
@@ -15,7 +15,7 @@ job; Kumi's job is to document the pattern for coexisting with `kumi_admin`
 in the same app, and chat_ops is the worked example, not a new one invented
 for this guide.
 
-## What chat_ops has, that you'll recognize
+## What chat_ops has that you'll recognize
 
 `ChatOps.Core` has three plain-Ash resources (`Site`, `Conversation`,
 `Message` — not `Kumi.Resource` shorthand, because policies are
@@ -74,7 +74,7 @@ redirect a visitor who has no session to a sign-in page — the widget would
 never render for the customer's actual visitors — or (b) whoever wrote the
 hook would have to special-case "allow no user through" for that one route,
 quietly widening the admin's auth guarantee for every other LiveView that
-reuses it. Two separate mounts, two separate route trees, is the boring and
+reuses it. Two separate mounts, two separate route trees: that is the boring and
 correct answer.
 
 **Verified**: `GET /kumi-admin` with no session returns `302` to `/sign-in`,
@@ -294,7 +294,7 @@ pretending to cover it. This run verified `/embed.js` returns `200` through
 the exempt `:embed_js` pipeline (see the table below); it did **not**
 reproduce the 403 itself (that would require routing the same request
 through the plain `:browser` pipeline instead, which the running app
-never does) — take the 403 claim as inherited from the router's own comment
+never does) — take the 403 claim as inherited from the router's own comment,
 not as re-verified in this session.
 
 ### 4b. Framing controls block the customer-site iframe — and the header you'll reach for is the wrong one
@@ -452,5 +452,5 @@ existed, `mix ash.setup` reported "already up").
 - **No rate limiting on the no-actor create paths.** `Conversation
   .visitor_create` and `Message.visitor_create` are open to anyone who can
   reach the widget URL — nothing in this guide's slice throttles a visitor
-  hammering `send_message`. That's an intentional deferral for this walk
-  through, not a general Kumi position on the topic.
+  hammering `send_message`. That's an intentional deferral for this
+  walkthrough, not a general Kumi position on the topic.

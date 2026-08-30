@@ -7,7 +7,7 @@ defmodule Mix.Tasks.Kumi.Resolve do
 
   Not part of the public library API — `Kumi.plan/3` itself takes an
   explicit repo/domains and never reads Application config; this module
-  is the one place that convenience-resolution logic lives, so the two
+  is the one place where convenience-resolution logic lives, so the two
   mix tasks that need it can't drift apart.
   """
 

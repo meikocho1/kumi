@@ -19,15 +19,15 @@
 </p>
 
 Kumi is an application platform for [Ash](https://ash-hq.org) and Phoenix.
-You declare your resources; Kumi gives you database plans that know what
-loses data, an admin derived from those resources, and a generator to
-start from. It never hides Ash at any point, which is the constraint the
-rest of the design bends around.
+You declare your resources; Kumi gives you database plans that say which
+changes destroy data, an admin derived from those resources, and a
+generator to start from. It never hides Ash at any point, which is the
+constraint the rest of the design bends around.
 
 ## What it does
 
 `mix ash.codegen` compares your resources against snapshots it generated
-itself. That answers "what did my code change", which is the right
+itself. That answers "what did my code change?", which is the right
 question nearly all of the time.
 
 Nothing in that path opens a connection and looks at the database. So the
@@ -62,7 +62,7 @@ The judgment also never depends on your data. `--probe` is opt-in, runs
 read-only counts, and will tell you that the column you are about to make
 NOT NULL has 4,102 NULLs in it. What it will not do is change a
 classification. `mix kumi.plan --check` has to mean the same thing in CI
-no matter which database it pointed at.
+no matter which database it is pointed at.
 
 ```bash
 mix kumi.plan            # the diff
@@ -82,10 +82,10 @@ them:
 </p>
 
 Tables, forms, search, `belongs_to` selects, child tables, dashboard
-metrics, workflow stages. No per-resource admin code. It brings no
-authentication of its own and mounts behind whatever you already use, and
-`mix kumi.gen.auth google` will write the OAuth2 wiring that
-`ash_authentication` has no installer for.
+metrics, workflow stages. No per-resource admin code. The admin brings
+no authentication of its own and mounts behind whatever you already use.
+For sign-in itself, `mix kumi.gen.auth google` writes the OAuth2 wiring
+that `ash_authentication` has no installer for.
 
 That part is younger than the plan engine and it shows. Look at the plan
 engine first.
@@ -103,7 +103,7 @@ at the app level. If what you want is to look at your data, use
 
 ## What's in here
 
-Four independent mix packages, released together:
+Four independent Mix packages, released together:
 
 | Package | What it gives you |
 |---|---|
@@ -120,19 +120,19 @@ before pointing it at yours.
 
 MIT, 430 tests, nothing published to Hex yet. Not being on Hex is
 deliberate: I would rather be told the classification rules are wrong
-than find out after somebody depended on them. If you disagree with a
+now than once somebody is depending on them. If you disagree with a
 call it makes, that is the most useful issue you could open.
 
 ## Three things it won't do
 
 Not gaps. Decisions, and they aren't up for relitigation in the code.
 
-**It won't hide Ash.** Every Kumi DSL compiles to ordinary Ash resources,
+**It won't hide Ash.** Every Kumi DSL compiles to an ordinary Ash resource,
 and `mix kumi.expand` prints exactly what you get. There's a test
 asserting the printed source matches the compiled definition, so that
 claim can't quietly rot. Dropping to plain Ash is the supported path, not
-the failure path. If the shorthand can't round-trip through
-`kumi.expand`, the feature stays out of the shorthand.
+the failure path. If a feature can't round-trip through `kumi.expand`, it
+stays out of the shorthand.
 
 **It won't abstract over the data layer.** AshPostgres only. No Ecto
 adapter. I don't want to write that and you probably don't want to depend
@@ -151,7 +151,7 @@ the directory *above* your Kumi clone:
 ```bash
 mix archive.install hex igniter_new
 mix archive.install hex phx_new
-(cd Kumi/kumi_new && mix archive.build && mix archive.install)  # confirms [Yn]
+(cd Kumi/kumi_new && mix archive.build && mix archive.install)  # confirm the [Yn] prompt
 
 # From nothing to a running app: Ash, Phoenix, auth, admin, database.
 mix kumi.new my_crm --kumi-path Kumi --db-port 5434
@@ -163,13 +163,14 @@ mix kumi.new my_crm --kumi-path Kumi --db-port 5434
 rejects the generated project with "the dependency kumi in mix.exs is
 overriding a child dependency", because the absolute path written into
 your `mix.exs` stops matching the `../kumi` that `kumi_admin` declares.
-Found by running the quick start above against a symlinked checkout, which
-is why it's written down here instead of being rediscovered by you.
+The quick start above walks straight into this if the path you pass is a
+symlink, which is why it's written down here rather than left for you to
+rediscover.
 
 Then, from inside `my_crm/`:
 
 ```bash
-# What does my database actually look like, versus my code?
+# What does my database actually look like, compared with my code?
 mix kumi.plan
 #   SAFE       add_column accounts.industry (text, nullable)
 #   REVIEW     possible_rename accounts.title -> accounts.name
@@ -203,10 +204,10 @@ Adding Kumi to an **existing** app instead? See
   upstream installer, and where two-factor auth actually has to come from.
 - **[`kumi/guides/frontend.md`](kumi/guides/frontend.md)** — putting your
   public-facing frontend on the same Phoenix app as the admin, including
-  the security headers that will otherwise silently break embedding.
+  the security headers that silently break embedding when they are wrong.
 - **[`kumi/guides/ash-gotchas.md`](kumi/guides/ash-gotchas.md)** — the
-  non-obvious Ash / Spark / AshPostgres / Igniter behaviours that cost
-  real debugging time while building this.
+  non-obvious Ash / Spark / AshPostgres / Igniter behaviours that cost real
+  debugging time to track down while this was being built.
 
 ## Requirements
 

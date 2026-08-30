@@ -27,7 +27,7 @@ not replace codegen.
 
 ### What makes it more than a diff
 
-Any of us could read `pg_catalog`. The part worth arguing about is that
+Anyone can read `pg_catalog`. The part worth arguing about is that
 every difference is classified by whether resolving it destroys data, and
 that type changes fail closed: if Kumi cannot prove a change is widening,
 it says DANGEROUS. That will produce false alarms. A false DANGEROUS costs
@@ -35,9 +35,9 @@ you a second look, a missed one costs you a column, and that trade is the
 whole design.
 
 Classification never reads your data, only the schema. `--probe` adds
-read-only counts as annotations and is forbidden from changing a verdict,
-so `mix kumi.plan --check` means the same thing in CI regardless of which
-database it ran against.
+read-only counts as annotations and can never change a verdict, so
+`mix kumi.plan --check` means the same thing in CI regardless of which
+database it is run against.
 
 ## Quick start
 
@@ -50,7 +50,7 @@ the DB, and installs everything — one command to a running app:
 ```bash
 mix archive.install hex igniter_new
 mix archive.install hex phx_new
-(cd ../kumi_new && mix archive.build && mix archive.install)  # not on Hex yet, confirms [Yn]
+(cd ../kumi_new && mix archive.build && mix archive.install)  # not on Hex yet; confirm the [Yn] prompt
 mix kumi.new my_crm --kumi-path .. --db-port 5434
 ```
 
@@ -62,8 +62,8 @@ pick from the printed catalog.
 
 ### Existing app
 
-Not on Hex yet, so `mix igniter.install kumi` doesn't resolve a package
-yet — use a path dependency plus the installer directly:
+Kumi isn't on Hex yet, so `mix igniter.install kumi` has no package to
+resolve. Use a path dependency and run the installer directly:
 
 ```elixir
 # mix.exs
@@ -107,7 +107,7 @@ crm_accounts:
 1 safe / 1 review / 1 dangerous
 ```
 
-Programmatic API (no global config is read by library code):
+Programmatic API (library code reads no global config):
 
 ```elixir
 %Kumi.Plan{} = Kumi.plan(MyApp.Repo, [MyApp.Domain], snapshot_dir: "priv/resource_snapshots/repo")
@@ -165,7 +165,7 @@ mix test
 
 This package is the first piece ("the wedge") of a larger effort:
 an application platform on Phoenix/Ash where humans and AI agents modify
-only application definitions, and tooling guarantees safe, reviewable
+only application definitions, and the tooling guarantees safe, reviewable
 paths to production.
 
 > Ash helps you model your application. Kumi helps you ship it as a product.
