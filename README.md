@@ -15,16 +15,22 @@
 </p>
 
 Kumi is an application platform for [Ash](https://ash-hq.org) and Phoenix.
-You define your resources in code; Kumi gives you a real admin UI, a login
-flow, safe database plans, and a one-command generator to start from —
-without hiding Ash from you at any point.
+You declare your resources; Kumi gives you database plans that know what
+loses data, an admin derived from those resources, and a generator to
+start from. It never hides Ash at any point, which is the constraint the
+rest of the design bends around.
 
-## The 30-second version
+## What it does
 
-**Your migrations tell you what your code did. They don't tell you what your
-database *is*.** `mix ash.codegen` compares your code to its own snapshots.
-Kumi compares your code to the live database, and classifies every
-difference by whether it can lose data:
+`mix ash.codegen` compares your resources against snapshots it generated
+itself. That answers "what did my code change", which is the right
+question nearly all of the time.
+
+Nothing in that path opens a connection and looks at the database. So the
+moment somebody changes the schema outside a migration, the snapshot
+history stops describing reality, and nothing tells you.
+
+Kumi reads `pg_catalog` and diffs it against your resources:
 
 ```text
 crm_accounts:
@@ -35,32 +41,61 @@ crm_accounts:
 1 safe / 1 review / 1 dangerous
 ```
 
-That column someone added by hand in production, three months ago, that
-nobody wrote down? `ash.codegen` cannot see it. This is the whole point.
-`mix kumi.plan --check` puts it in CI, and `mix kumi.apply` repairs the
-SAFE subset in dev — never the rest.
+### The classification is the point
 
-Then, because your resources are already declared, you get the rest of the
-product shell for free:
+The diff itself is not interesting. Anyone can read `pg_catalog`.
+
+What matters is that every difference is judged on whether resolving it
+can destroy data. SAFE is pure additions. REVIEW is constraint tightening
+and anything Kumi is guessing at, like a rename. DANGEROUS is everything
+that deletes, and type changes fail closed: if Kumi cannot prove a change
+is widening, it calls it dangerous.
+
+That last rule will annoy you at some point. It is meant to. A false
+DANGEROUS costs you a second look; a missed one costs you a column.
+
+The judgment also never depends on your data. `--probe` is opt-in, runs
+read-only counts, and will tell you that the column you are about to make
+NOT NULL has 4,102 NULLs in it. What it will not do is change a
+classification. `mix kumi.plan --check` has to mean the same thing in CI
+no matter which database it pointed at.
+
+```bash
+mix kumi.plan            # the diff
+mix kumi.plan --check    # exit 1 if anything is REVIEW or DANGEROUS
+mix kumi.apply           # dev only, and only the SAFE subset
+```
+
+This does not replace `ash.codegen`. Different question. Run both.
+
+### And then the rest of it
+
+Because your resources are already declared, an admin can be derived from
+them:
 
 <p align="center">
-  <img src="design/screenshots/kumi-detail-atomic-child.png" alt="A Kumi admin record page — attributes, an enum stage badge, and resolved belongs_to relations — generated from Ash resources with no per-resource code" width="860">
+  <img src="design/screenshots/kumi-detail-atomic-child.png" alt="A Kumi admin record page showing attributes, an enum stage badge, and resolved belongs_to relations" width="860">
 </p>
 
 Tables, forms, search, `belongs_to` selects, child tables, dashboard
-metrics and workflow stages — derived from the resources you already
-wrote, with **no per-resource admin code**, and no authentication of its
-own: it sits behind whatever your app already uses
-([Google, GitHub, OIDC and friends](kumi/guides/auth.md)).
+metrics, workflow stages. No per-resource admin code. It brings no
+authentication of its own and mounts behind whatever you already use, and
+`mix kumi.gen.auth google` will write the OAuth2 wiring that
+`ash_authentication` has no installer for.
+
+That part is younger than the plan engine and it shows. Look at the plan
+engine first.
 
 ## How is this different from `ash_admin`?
 
-`ash_admin` is a developer's inspector for your data — excellent at that,
-and deliberately generic. Kumi is aimed at the thing you hand to a
-non-developer: an app-level DSL where *you* declare the navigation,
-dashboard metrics and workflow stages, plus the plan engine and the
-generator around it. If you want to browse your resources in dev, use
-`ash_admin`. If you want the admin to be the product, that's this.
+They are not really competing. `ash_admin` is a developer's inspector for
+your data, generic on purpose, and it is the right tool for poking at
+resources in dev.
+
+`kumi_admin` is aimed at the screen you hand to someone who is not a
+developer: you declare navigation, dashboard metrics and workflow stages
+at the app level. If what you want is to look at your data, use
+`ash_admin`.
 
 ## What's in here
 
@@ -73,27 +108,35 @@ Four independent mix packages, released together:
 | **[`kumi_storage/`](kumi_storage/)** | Uploads, as an installable module. Generates a plain Ash resource with an `:upload` action; the admin picks it up automatically. |
 | **[`kumi_new/`](kumi_new/)** | `mix kumi.new my_app` — from nothing to a running application with an admin and a login screen, in one command. |
 
-**Status: pre-release.** MIT licensed and buildable today, but nothing is
-published to Hex yet and APIs will change before the first tag. See
-[`RELEASING.md`](RELEASING.md) for what's left.
+## Where this actually stands
 
-## Three things Kumi will not do
+A side project. I use it on my own Ash app. It has never run against
+anything I would call production traffic, and you should weigh that
+before pointing it at yours.
 
-These are settled design decisions, not gaps:
+MIT, 430 tests, nothing published to Hex yet. Not being on Hex is
+deliberate: I would rather be told the classification rules are wrong
+than find out after somebody depended on them. If you disagree with a
+call it makes, that is the most useful issue you could open.
 
-1. **It will never hide Ash.** Every Kumi DSL compiles to ordinary,
-   inspectable Ash resources, `mix kumi.expand` always prints exactly
-   what compiles, and writing plain Ash is a supported escape hatch
-   rather than a fallback for when Kumi breaks. Anything the shorthand
-   can't round-trip through `kumi.expand` is intentionally left out —
-   you drop to Ash for it.
-2. **It targets Ash/AshPostgres only.** No Ecto adapter, no persistence
-   abstraction.
-3. **It complements `mix ash.codegen`, it doesn't replace it.**
-   `ash.codegen` compares your code to its own snapshots — your code's
-   history. Kumi compares your code to the database itself, which is a
-   different question, and the one that catches a column someone added by
-   hand in production.
+## Three things it won't do
+
+Not gaps. Decisions, and they aren't up for relitigation in the code.
+
+**It won't hide Ash.** Every Kumi DSL compiles to ordinary Ash resources,
+and `mix kumi.expand` prints exactly what you get. There's a test
+asserting the printed source matches the compiled definition, so that
+claim can't quietly rot. Dropping to plain Ash is the supported path, not
+the failure path. If the shorthand can't round-trip through
+`kumi.expand`, the feature stays out of the shorthand.
+
+**It won't abstract over the data layer.** AshPostgres only. No Ecto
+adapter. I don't want to write that and you probably don't want to depend
+on it.
+
+**It won't replace `ash.codegen`.** Codegen compares your code to its own
+history. Kumi compares your code to the database. Both are worth running,
+and I run both.
 
 ## Quick look
 
@@ -106,16 +149,18 @@ mix archive.install hex igniter_new
 mix archive.install hex phx_new
 (cd Kumi/kumi_new && mix archive.build && mix archive.install)  # confirms [Yn]
 
-# Start a new project — Ash, Phoenix, authentication, admin, database.
+# From nothing to a running app: Ash, Phoenix, auth, admin, database.
 mix kumi.new my_crm --kumi-path Kumi --db-port 5434
 ```
 
 (Once Kumi ships to Hex, `--kumi-path` and the archive build both go away.)
 
-`--kumi-path` must be the checkout's *real* path — pass a symlink to it and
-Mix rejects the generated project with "the dependency kumi in mix.exs is
-overriding a child dependency", because the absolute path written into your
-`mix.exs` no longer matches the `../kumi` that `kumi_admin` declares.
+`--kumi-path` has to be the checkout's *real* path. Pass a symlink and Mix
+rejects the generated project with "the dependency kumi in mix.exs is
+overriding a child dependency", because the absolute path written into
+your `mix.exs` stops matching the `../kumi` that `kumi_admin` declares.
+Found by running the quick start above against a symlinked checkout, which
+is why it's written down here instead of being rediscovered by you.
 
 Then, from inside `my_crm/`:
 
@@ -166,7 +211,7 @@ PostgreSQL 17.
 
 ## Contributing
 
-Bug reports, features and PRs are welcome — see
+Bug reports, features and PRs are welcome. See
 **[`CONTRIBUTING.md`](CONTRIBUTING.md)** for setup, the checks CI runs,
 and what a reviewer looks for. Security issues go through private
 reporting instead: **[`SECURITY.md`](SECURITY.md)**.

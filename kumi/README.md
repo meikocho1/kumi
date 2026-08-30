@@ -5,22 +5,39 @@
 > (actual), detects drift, and classifies every change as
 > `SAFE` / `REVIEW` / `DANGEROUS`.
 
-**Status: pre-alpha (v0.1). Not yet published to Hex. APIs will change.**
+Pre-alpha (v0.1), not on Hex, APIs will change. A side project, used on a
+personal Ash app, never run against production traffic.
 
 ## Why, when `mix ash.codegen` already exists
 
-`ash.codegen` diffs your resources against **its own snapshots** — your code's
-history. Kumi diffs your resources against **the database itself** (pg_catalog).
-That difference matters exactly when the two disagree:
+Codegen diffs your resources against snapshots it wrote itself. That is
+your code's history, and it is the right thing to look at nearly all of
+the time. Nothing in that path opens a connection to the database.
 
 ```text
 ash.codegen:   Current Resources  vs  Previous Snapshots   (code history)
 kumi.plan:     Desired Resources  vs  Actual PostgreSQL    (live database)
 ```
 
-A column someone added by hand in production is invisible to `ash.codegen`
-and reported by `mix kumi.plan` as drift. Kumi complements codegen; it does
-not replace it.
+So anything that changed in the database outside a migration is invisible
+to codegen, permanently. `mix kumi.plan` reports it as drift.
+
+The two answer different questions and both are worth running. Kumi does
+not replace codegen.
+
+### What makes it more than a diff
+
+Any of us could read `pg_catalog`. The part worth arguing about is that
+every difference is classified by whether resolving it destroys data, and
+that type changes fail closed: if Kumi cannot prove a change is widening,
+it says DANGEROUS. That will produce false alarms. A false DANGEROUS costs
+you a second look, a missed one costs you a column, and that trade is the
+whole design.
+
+Classification never reads your data, only the schema. `--probe` adds
+read-only counts as annotations and is forbidden from changing a verdict,
+so `mix kumi.plan --check` means the same thing in CI regardless of which
+database it ran against.
 
 ## Quick start
 
