@@ -14,6 +14,10 @@
   <img src="https://img.shields.io/badge/elixir-~%3E%201.20-purple.svg" alt="Elixir">
 </p>
 
+<p align="center">
+  English · <a href="README.ja.md">日本語</a>
+</p>
+
 Kumi is an application platform for [Ash](https://ash-hq.org) and Phoenix.
 You declare your resources; Kumi gives you database plans that know what
 loses data, an admin derived from those resources, and a generator to
