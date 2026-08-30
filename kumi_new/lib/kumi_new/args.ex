@@ -11,6 +11,7 @@ defmodule KumiNew.Args do
             setup?: true,
             json_api?: false,
             auth_strategies: ["password"],
+            auth_providers: [],
             modules_flag: :unset,
             modules: []
 
@@ -24,6 +25,7 @@ defmodule KumiNew.Args do
           setup?: boolean(),
           json_api?: boolean(),
           auth_strategies: [String.t()],
+          auth_providers: [String.t()],
           modules_flag: modules_flag(),
           modules: [atom()]
         }
@@ -39,9 +41,12 @@ defmodule KumiNew.Args do
     modules: :boolean
   ]
 
-  # The values `mix ash_authentication.add_strategy` can actually generate.
-  # Everything else it supports (google, github, apple, ...) is hand-wired DSL.
+  # Split by who generates them. `mix ash_authentication.add_strategy`
+  # handles the first list and runs during `igniter.new`; the OAuth2
+  # providers have no upstream installer, so `mix kumi.gen.auth` writes
+  # them into the generated app afterwards.
   @auth_strategies ~w(password magic_link api_key)
+  @auth_providers ~w(google github)
 
   @spec parse([String.t()]) :: {:ok, t()} | {:error, String.t()}
   def parse(argv) do
@@ -51,7 +56,7 @@ defmodule KumiNew.Args do
          {:ok, app_name} <- fetch_app_name(positional),
          :ok <- KumiNew.Name.validate(app_name),
          {:ok, kumi_path} <- fetch_kumi_path(opts),
-         {:ok, auth_strategies} <- fetch_auth_strategies(opts),
+         {:ok, {auth_strategies, auth_providers}} <- fetch_auth_strategies(opts),
          {:ok, modules_flag} <- fetch_modules_flag(opts) do
       {:ok,
        %__MODULE__{
@@ -62,6 +67,7 @@ defmodule KumiNew.Args do
          setup?: Keyword.get(opts, :setup, true),
          json_api?: Keyword.get(opts, :json_api, false),
          auth_strategies: auth_strategies,
+         auth_providers: auth_providers,
          modules_flag: modules_flag
        }}
     end
@@ -98,10 +104,10 @@ defmodule KumiNew.Args do
         {:error, "--auth-strategy cannot be empty (omit the flag for the default, password)"}
 
       csv ->
-        strategies = csv |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
+        requested = csv |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
 
-        case Enum.reject(strategies, &(&1 in @auth_strategies)) do
-          [] -> {:ok, strategies}
+        case Enum.reject(requested, &(&1 in @auth_strategies or &1 in @auth_providers)) do
+          [] -> {:ok, Enum.split_with(requested, &(&1 in @auth_strategies))}
           bad -> {:error, unknown_strategies_message(bad)}
         end
     end
@@ -109,9 +115,10 @@ defmodule KumiNew.Args do
 
   defp unknown_strategies_message(bad) do
     "unknown --auth-strategy value(s): #{Enum.join(bad, ", ")}. " <>
-      "Supported: #{Enum.join(@auth_strategies, ", ")}. " <>
-      "OAuth providers (google, github, apple, slack, auth0, oidc) are not generated — " <>
-      "ash_authentication has no installer for them; see the auth guide to add one by hand."
+      "Supported: #{Enum.join(@auth_strategies ++ @auth_providers, ", ")}. " <>
+      "oidc needs an issuer URL, so it is not available here — run " <>
+      "`mix kumi.gen.auth oidc --base-url ...` inside the generated app. " <>
+      "Apple and Slack are not generated yet; see the auth guide."
   end
 
   defp fetch_modules_flag(opts) do

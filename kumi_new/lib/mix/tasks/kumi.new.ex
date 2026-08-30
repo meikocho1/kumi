@@ -65,6 +65,7 @@ defmodule Mix.Tasks.Kumi.New do
          :ok <- format_injected(args),
          :ok <- run_in_app(args, "deps.get", []),
          :ok <- run_in_app(args, "kumi.install", ["--yes"]),
+         :ok <- maybe_generate_auth_providers(args),
          :ok <- maybe_install_admin(args),
          :ok <- maybe_install_modules(args),
          :ok <- maybe_codegen_modules(args) do
@@ -120,17 +121,21 @@ defmodule Mix.Tasks.Kumi.New do
 
     install = if args.json_api?, do: install <> ",ash_json_api", else: install
 
-    stream_cmd("mix", [
-      "igniter.new",
-      args.app_name,
-      "--with",
-      "phx.new",
-      "--install",
-      install,
-      "--auth-strategy",
-      Enum.join(args.auth_strategies, ","),
-      "--yes"
-    ])
+    # OAuth providers are deliberately not passed here — igniter.new hands
+    # `--auth-strategy` straight to ash_authentication, which only knows how
+    # to generate password/magic_link/api_key. The providers are generated
+    # afterwards by `mix kumi.gen.auth`, once the user resource exists.
+    auth_flags =
+      case args.auth_strategies do
+        [] -> []
+        strategies -> ["--auth-strategy", Enum.join(strategies, ",")]
+      end
+
+    stream_cmd(
+      "mix",
+      ["igniter.new", args.app_name, "--with", "phx.new", "--install", install] ++
+        auth_flags ++ ["--yes"]
+    )
   end
 
   defp inject_deps(args) do
@@ -218,6 +223,12 @@ defmodule Mix.Tasks.Kumi.New do
   defp run_in_app(args, task, extra_args) do
     Mix.shell().info("\n==> mix #{task} #{Enum.join(extra_args, " ")}\n")
     stream_cmd("mix", [task | extra_args], cd: args.app_name)
+  end
+
+  defp maybe_generate_auth_providers(%{auth_providers: []}), do: :ok
+
+  defp maybe_generate_auth_providers(args) do
+    run_in_app(args, "kumi.gen.auth", args.auth_providers ++ ["--yes"])
   end
 
   defp maybe_install_admin(%{admin?: false}), do: :ok

@@ -150,8 +150,8 @@ Adding Kumi to an **existing** app instead? See
 - **[`kumi/guides/api.md`](kumi/guides/api.md)** — adding a JSON:API when
   you need one, and how relationship depth works.
 - **[`kumi/guides/auth.md`](kumi/guides/auth.md)** — sign-in strategies,
-  adding Google/GitHub/OIDC providers, and where two-factor auth actually
-  has to come from.
+  `mix kumi.gen.auth google` for the OAuth2 providers that have no
+  upstream installer, and where two-factor auth actually has to come from.
 - **[`kumi/guides/frontend.md`](kumi/guides/frontend.md)** — putting your
   public-facing frontend on the same Phoenix app as the admin, including
   the security headers that will otherwise silently break embedding.

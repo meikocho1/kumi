@@ -92,6 +92,23 @@ tag they collapse into that version's section.
 - `:image` fields in the shorthand DSL expand to a relationship to the
   generated resource.
 
+**`kumi` — sign-in providers**
+
+- `mix kumi.gen.auth google|github|oidc` generates an OAuth2 sign-in
+  strategy on your user resource. `mix ash_authentication.add_strategy`
+  covers `password`, `magic_link` and `api_key`; the OAuth2 providers are
+  hand-written DSL upstream, and this writes those same pieces as ordinary
+  Ash source — the `UserIdentity` resource, the strategy block, a
+  `register_with_<provider>` upsert action, and `secret_for/4` clauses
+  that read credentials from application env.
+- Two parts of the generated action are detected from your resource rather
+  than assumed: without a unique identity it generates a plain create
+  instead of DSL that will not compile, and `confirmed_at` is only set
+  when that attribute exists.
+- The provider console's redirect URI, the config values, and making
+  `hashed_password` nullable are printed as instructions, never guessed
+  at — no credential is written into source.
+
 **`kumi_new` — the generator**
 
 - `mix kumi.new my_app` goes from nothing to a running application in one
@@ -99,10 +116,11 @@ tag they collapse into that version's section.
   database setup, and a themed starting page.
 - Module selection at generation time, so you choose which optional
   modules (for example storage) the new project starts with.
-- `--auth-strategy` selects which `ash_authentication` strategies the new
-  project is generated with (`password`, `magic_link`, `api_key`, comma
-  separated; default `password`). Values the upstream installer cannot
-  generate are rejected before generation starts rather than failing
+- `--auth-strategy` selects the new project's sign-in methods, mixing the
+  two generators freely: `password`, `magic_link`, `api_key` go to
+  `ash_authentication`'s installer, `google` and `github` to
+  `mix kumi.gen.auth` once the user resource exists. Values neither tool
+  can generate are rejected before generation starts rather than failing
   part-way through.
 - The generated sign-in page styles OAuth provider buttons to match the
   rest of the page, so adding Google or GitHub by hand does not leave an
