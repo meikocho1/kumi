@@ -24,9 +24,10 @@ defmodule Mix.Tasks.Kumi.New do
     * `--auth-strategy LIST` — comma-separated ash_authentication strategies
       to generate (default: `password`). Accepts `password`, `magic_link`,
       `api_key` — the three `mix ash_authentication.add_strategy` can
-      generate. OAuth providers (Google, GitHub, Apple, Slack, Auth0, OIDC)
-      and two-factor auth have no installer upstream and are added by hand;
-      see `kumi/guides/auth.md`.
+      generate. The OAuth providers have no installer upstream:
+      `mix kumi.gen.auth google github oidc` generates those, and the rest
+      (Apple, Slack, Auth0) are written by hand. Two-factor auth comes from
+      the identity provider. See `kumi/guides/auth.md`.
     * `--with LIST` — comma-separated optional modules to install and wire
       in, e.g. `--with storage`. See the catalog below.
     * `--no-modules` — skip all optional modules explicitly (also
