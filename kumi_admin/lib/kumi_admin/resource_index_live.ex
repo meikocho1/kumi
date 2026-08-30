@@ -12,6 +12,11 @@ defmodule KumiAdmin.ResourceIndexLive do
   `limit + 1` rows and slicing off the extra one gives an honest
   "is there a next page" without needing that declaration anywhere.
 
+  List state (search term and page offset) lives in the URL, not in
+  assigns: a filtered page is a link someone can bookmark, share or
+  reload. `mount/3` resolves who and what; `handle_params/3` owns the
+  single read, and the search/pagination events only `push_patch`.
+
   Without an actor, or without access, this renders that state honestly
   instead of crashing — see `KumiAdmin.Router` moduledoc.
   """
@@ -37,28 +42,65 @@ defmodule KumiAdmin.ResourceIndexLive do
             mount_path: context.mount_path,
             sign_out_path: context.sign_out_path
           )
-          |> assign(actor: context.actor, resource: context.resource, offset: 0, search: "")
+          |> assign(actor: context.actor, resource: context.resource)
           |> assign(
             can_create?:
               !!context.resource &&
                 KumiAdmin.Capability.can_create?(context.resource, context.actor)
           )
-          |> load_page()
 
         {:ok, socket}
     end
   end
 
+  def handle_params(params, _uri, socket) do
+    {:noreply,
+     socket
+     |> assign(search: search_param(params), offset: offset_param(params))
+     |> load_page()}
+  end
+
+  defp search_param(%{"q" => term}) when is_binary(term), do: term
+  defp search_param(_params), do: ""
+
+  # A hand-edited or stale `?offset=` is untrusted input: anything that
+  # isn't a non-negative integer falls back to the first page rather than
+  # reaching `Ash.Query.offset/2`.
+  defp offset_param(%{"offset" => value}) when is_binary(value) do
+    case Integer.parse(value) do
+      {offset, ""} when offset >= 0 -> offset
+      _ -> 0
+    end
+  end
+
+  defp offset_param(_params), do: 0
+
   def handle_event("next", _params, socket) do
-    {:noreply, socket |> update(:offset, &(&1 + @page_size)) |> load_page()}
+    {:noreply, patch(socket, socket.assigns.offset + @page_size, socket.assigns.search)}
   end
 
   def handle_event("prev", _params, socket) do
-    {:noreply, socket |> update(:offset, &max(&1 - @page_size, 0)) |> load_page()}
+    {:noreply, patch(socket, max(socket.assigns.offset - @page_size, 0), socket.assigns.search)}
   end
 
+  # Search fires per keystroke, so it replaces the current history entry
+  # instead of pushing one per character; paging pushes, because Back
+  # meaning "previous page" is what a reader expects.
   def handle_event("search", %{"q" => term}, socket) do
-    {:noreply, socket |> assign(search: term, offset: 0) |> load_page()}
+    {:noreply, patch(socket, 0, term, replace: true)}
+  end
+
+  defp patch(socket, offset, search, opts \\ []) do
+    push_patch(socket, [to: index_path(socket, offset, search)] ++ opts)
+  end
+
+  defp index_path(socket, offset, search) do
+    base = "#{socket.assigns.mount_path}/#{KumiAdmin.Slug.for_resource(socket.assigns.resource)}"
+
+    case Enum.reject([q: search, offset: offset], fn {_key, value} -> value in ["", 0] end) do
+      [] -> base
+      query -> base <> "?" <> URI.encode_query(query)
+    end
   end
 
   defp load_page(socket) do
