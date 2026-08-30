@@ -10,6 +10,7 @@ defmodule KumiNew.Args do
             admin?: true,
             setup?: true,
             json_api?: false,
+            auth_strategies: ["password"],
             modules_flag: :unset,
             modules: []
 
@@ -22,6 +23,7 @@ defmodule KumiNew.Args do
           admin?: boolean(),
           setup?: boolean(),
           json_api?: boolean(),
+          auth_strategies: [String.t()],
           modules_flag: modules_flag(),
           modules: [atom()]
         }
@@ -32,9 +34,14 @@ defmodule KumiNew.Args do
     admin: :boolean,
     setup: :boolean,
     json_api: :boolean,
+    auth_strategy: :string,
     with: :string,
     modules: :boolean
   ]
+
+  # The values `mix ash_authentication.add_strategy` can actually generate.
+  # Everything else it supports (google, github, apple, ...) is hand-wired DSL.
+  @auth_strategies ~w(password magic_link api_key)
 
   @spec parse([String.t()]) :: {:ok, t()} | {:error, String.t()}
   def parse(argv) do
@@ -44,6 +51,7 @@ defmodule KumiNew.Args do
          {:ok, app_name} <- fetch_app_name(positional),
          :ok <- KumiNew.Name.validate(app_name),
          {:ok, kumi_path} <- fetch_kumi_path(opts),
+         {:ok, auth_strategies} <- fetch_auth_strategies(opts),
          {:ok, modules_flag} <- fetch_modules_flag(opts) do
       {:ok,
        %__MODULE__{
@@ -53,6 +61,7 @@ defmodule KumiNew.Args do
          admin?: Keyword.get(opts, :admin, true),
          setup?: Keyword.get(opts, :setup, true),
          json_api?: Keyword.get(opts, :json_api, false),
+         auth_strategies: auth_strategies,
          modules_flag: modules_flag
        }}
     end
@@ -81,6 +90,28 @@ defmodule KumiNew.Args do
       path ->
         validate_kumi_path(Path.expand(path))
     end
+  end
+
+  defp fetch_auth_strategies(opts) do
+    case Keyword.get(opts, :auth_strategy, "password") do
+      "" ->
+        {:error, "--auth-strategy cannot be empty (omit the flag for the default, password)"}
+
+      csv ->
+        strategies = csv |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
+
+        case Enum.reject(strategies, &(&1 in @auth_strategies)) do
+          [] -> {:ok, strategies}
+          bad -> {:error, unknown_strategies_message(bad)}
+        end
+    end
+  end
+
+  defp unknown_strategies_message(bad) do
+    "unknown --auth-strategy value(s): #{Enum.join(bad, ", ")}. " <>
+      "Supported: #{Enum.join(@auth_strategies, ", ")}. " <>
+      "OAuth providers (google, github, apple, slack, auth0, oidc) are not generated — " <>
+      "ash_authentication has no installer for them; see the auth guide to add one by hand."
   end
 
   defp fetch_modules_flag(opts) do

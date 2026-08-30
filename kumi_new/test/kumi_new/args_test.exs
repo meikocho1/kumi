@@ -21,6 +21,7 @@ defmodule KumiNew.ArgsTest do
     assert args.admin? == true
     assert args.setup? == true
     assert args.json_api? == false
+    assert args.auth_strategies == ["password"]
   end
 
   test "parses all flags", %{kumi_path: path} do
@@ -33,13 +34,24 @@ defmodule KumiNew.ArgsTest do
                "5434",
                "--no-admin",
                "--no-setup",
-               "--json-api"
+               "--json-api",
+               "--auth-strategy",
+               "password,magic_link"
              ])
 
     assert args.db_port == 5434
     assert args.admin? == false
     assert args.setup? == false
     assert args.json_api? == true
+    assert args.auth_strategies == ["password", "magic_link"]
+  end
+
+  test "rejects an auth strategy ash_authentication cannot generate", %{kumi_path: path} do
+    assert {:error, message} =
+             Args.parse(["my_crm", "--kumi-path", path, "--auth-strategy", "google"])
+
+    assert message =~ "unknown --auth-strategy value(s): google"
+    assert message =~ "auth guide"
   end
 
   test "errors when --kumi-path is missing" do

@@ -173,7 +173,7 @@ defmodule KumiNew.Inject do
   already wired into every auth route's `overrides:` list — nothing to
   register here, only to fill in). Restyles the sign-in page to the same
   design tokens: Kumi mark + app title banner, white card, accent
-  inputs/button. No footer override — `AshAuthentication.Phoenix.Overrides`
+  inputs/button, and OAuth provider buttons. No footer override — `AshAuthentication.Phoenix.Overrides`
   exposes no slot for one on the sign-in page.
   """
   @spec auth_overrides(String.t(), String.t()) :: String.t()
@@ -224,6 +224,20 @@ defmodule KumiNew.Inject do
 
       override Components.Password do
         set :toggler_class, "flex-none text-[#4338CA] hover:text-[#3730A3] px-2 first:pl-0 last:pr-0"
+      end
+
+      # Only rendered once an OAuth strategy (google, github, ...) is declared
+      # on the user resource — see kumi/guides/auth.md. Without this the
+      # provider buttons keep ash_authentication_phoenix's grey default and
+      # clash with the card above them.
+      override Components.OAuth2 do
+        set :root_class, "w-full mt-2"
+
+        set :link_class, \"\"\"
+        w-full flex justify-center py-2 px-4 rounded-md border border-[#e4e7ec]
+        bg-white text-sm font-medium text-[#101828] hover:bg-[#f6f7f9]
+        focus:outline-none focus:ring-2 focus:ring-[#4338CA] focus:ring-offset-2
+        \"\"\"
       end
 
       override Components.Password.Input do
