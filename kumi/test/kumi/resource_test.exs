@@ -286,6 +286,119 @@ defmodule Kumi.ResourceTest do
     end
   end
 
+  # Friction log P02: 13 of 14 resources in a real host application dropped
+  # out of the shorthand before their first field, because every one of them
+  # had a unique constraint and `fields do ... end` had no way to say so.
+  describe "identity (unique constraints) in the shorthand" do
+    test "FieldSpec.parse/2 reads `identity name, [fields]`" do
+      ast = quote(do: identity(:one_per_day, [:account_id, :server_day]))
+
+      assert [
+               %Kumi.Resource.FieldSpec{
+                 kind: :identity,
+                 name: :one_per_day,
+                 type: [:account_id, :server_day]
+               }
+             ] = Kumi.Resource.FieldSpec.parse(ast, __ENV__)
+    end
+
+    test "identity options drop to plain Ash rather than being silently ignored" do
+      ast = quote(do: identity(:one_per_day, [:server_day], nils_distinct?: false))
+
+      assert_raise ArgumentError, ~r/takes no options/, fn ->
+        Kumi.Resource.FieldSpec.parse(ast, __ENV__)
+      end
+    end
+
+    test "a non-atom field list is rejected with the intended spelling" do
+      ast = quote(do: identity(:one_per_day, ["server_day"]))
+
+      assert_raise ArgumentError, ~r/expects a list of attribute names/, fn ->
+        Kumi.Resource.FieldSpec.parse(ast, __ENV__)
+      end
+    end
+
+    test "Codegen emits an identities block and counts it as an emitted member" do
+      opts = [domain: Kumi.Test.ResourceDomain, repo: Kumi.Test.Repo, table: "stamps"]
+
+      specs = [
+        %Kumi.Resource.FieldSpec{kind: :field, name: :server_day, type: :date, opts: []},
+        %Kumi.Resource.FieldSpec{
+          kind: :identity,
+          name: :one_per_day,
+          type: [:server_day]
+        }
+      ]
+
+      source = Kumi.Resource.Codegen.generate(Kumi.Test.Resource.Stamp, opts, specs)
+
+      assert source =~ "identities do"
+      assert source =~ "identity(:one_per_day, [:server_day])"
+      assert Kumi.Resource.Codegen.emitted_members(specs).identities == [:one_per_day]
+    end
+
+    test "a shorthand module with an identity compiles, and expand recompiles to the same identity" do
+      source = """
+      defmodule Kumi.Test.Resource.IdentityCheck do
+        use Kumi.Resource,
+          domain: Kumi.Test.ResourceDomain,
+          repo: Kumi.Test.Repo,
+          table: "kumi_test_resource_identity_check"
+
+        fields do
+          field :server_day, :date, required: true
+          belongs_to :account, Kumi.Test.Resource.Account
+          identity :one_per_day, [:account_id, :server_day]
+        end
+      end
+      """
+
+      capture_io(:stderr, fn -> Code.compile_string(source) end)
+      module = Kumi.Test.Resource.IdentityCheck
+
+      assert [%{name: :one_per_day, keys: keys}] = Ash.Resource.Info.identities(module)
+      assert Enum.sort(keys) == [:account_id, :server_day]
+
+      # D1: what `mix kumi.expand` prints must compile to the same thing.
+      expanded =
+        String.replace(
+          apply(module, :__kumi_expand__, []),
+          "Kumi.Test.Resource.IdentityCheck",
+          "Kumi.Test.Resource.IdentityExpandCheck",
+          global: false
+        )
+
+      capture_io(:stderr, fn -> Code.compile_string(expanded) end)
+
+      assert normalize_identities(Kumi.Test.Resource.IdentityExpandCheck) ==
+               normalize_identities(module)
+    end
+
+    test "a hand-written `identities do ... end` alongside `fields do ... end` still fails to compile" do
+      source = """
+      defmodule Kumi.Test.Resource.MixedIdentitiesCheck do
+        use Kumi.Resource,
+          domain: Kumi.Test.ResourceDomain,
+          repo: Kumi.Test.Repo,
+          table: "kumi_test_resource_mixed_identities_check"
+
+        fields do
+          field :name, :string, required: true
+        end
+
+        identities do
+          identity :sneaky, [:name]
+        end
+      end
+      """
+
+      {:error, error} = compile_and_expect_error(source)
+
+      assert %CompileError{description: message} = error
+      assert message =~ "identities: [:sneaky]"
+    end
+  end
+
   # `@after_verify` failures crash the (linked) compiler-checker process
   # rather than raising in the calling process, so `assert_raise` can't
   # observe them directly. Compiling inside a `Task` we're linked to (and
@@ -374,6 +487,13 @@ defmodule Kumi.ResourceTest do
   defp normalize_relationship(resource, name) do
     rel = Ash.Resource.Info.relationship(resource, name)
     {rel.type, rel.name, rel.destination, rel.source_attribute, rel.destination_attribute}
+  end
+
+  defp normalize_identities(resource) do
+    resource
+    |> Ash.Resource.Info.identities()
+    |> Enum.map(&{&1.name, Enum.sort(&1.keys)})
+    |> Enum.sort()
   end
 
   defp normalize_actions(resource) do

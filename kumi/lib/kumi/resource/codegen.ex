@@ -24,17 +24,19 @@ defmodule Kumi.Resource.Codegen do
   @type emitted_members :: %{
           attributes: [atom()],
           relationships: [atom()],
-          actions: [atom()]
+          actions: [atom()],
+          identities: [atom()]
         }
 
   @doc """
-  The attribute/relationship/action names `generate/3` actually emits for
-  these field specs. Used by `Kumi.Resource`'s `@after_verify` check (H1
-  fix, blueprint §0 D1) to catch plain Ash DSL sections (`attributes do
-  ... end`, a second `relationships do ... end`, `calculations`,
-  `aggregates`, `identities`) declared alongside `fields do ... end` —
-  those compile into the resource but `mix kumi.expand` would never print
-  them, silently breaking "expand always prints exactly what compiles".
+  The attribute/relationship/action/identity names `generate/3` actually
+  emits for these field specs. Used by `Kumi.Resource`'s `@after_verify`
+  check (H1 fix, blueprint §0 D1) to catch plain Ash DSL sections
+  (`attributes do ... end`, a second `relationships do ... end`,
+  `calculations`, `aggregates`, a hand-written `identities do ... end`)
+  declared alongside `fields do ... end` — those compile into the
+  resource but `mix kumi.expand` would never print them, silently
+  breaking "expand always prints exactly what compiles".
   """
   @spec emitted_members([FieldSpec.t()]) :: emitted_members()
   def emitted_members(field_specs) do
@@ -53,10 +55,13 @@ defmodule Kumi.Resource.Codegen do
         name
       end
 
+    identity_names = for %FieldSpec{kind: :identity, name: name} <- field_specs, do: name
+
     %{
       attributes: @default_attribute_names ++ field_names ++ belongs_to_fk_names,
       relationships: relationship_names,
-      actions: @default_action_names
+      actions: @default_action_names,
+      identities: identity_names
     }
   end
 
@@ -69,6 +74,7 @@ defmodule Kumi.Resource.Codegen do
     attributes = Enum.filter(field_specs, &(&1.kind == :field))
     belongs_tos = Enum.filter(field_specs, &(&1.kind == :belongs_to))
     has_manys = Enum.filter(field_specs, &(&1.kind == :has_many))
+    identities = Enum.filter(field_specs, &(&1.kind == :identity))
 
     """
     defmodule #{inspect(module)} do
@@ -92,7 +98,7 @@ defmodule Kumi.Resource.Codegen do
 
         timestamps()
       end
-      #{relationships_block(belongs_tos, has_manys)}
+      #{relationships_block(belongs_tos, has_manys)}#{identities_block(identities)}
     end
     """
     |> Code.format_string!()
@@ -174,5 +180,20 @@ defmodule Kumi.Resource.Codegen do
 
   defp has_many_source(%FieldSpec{name: name, type: dest}) do
     "has_many #{inspect(name)}, #{inspect(dest)}"
+  end
+
+  defp identities_block([]), do: ""
+
+  defp identities_block(identities) do
+    """
+
+    identities do
+      #{Enum.map_join(identities, "\n", &identity_source/1)}
+    end
+    """
+  end
+
+  defp identity_source(%FieldSpec{name: name, type: fields}) do
+    "identity #{inspect(name)}, #{inspect(fields)}"
   end
 end

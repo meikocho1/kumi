@@ -22,6 +22,8 @@ defmodule Kumi.Resource do
           field :status, :select, options: [:lead, :active, :lost], default: :lead
           belongs_to :account, MyApp.Account
           has_many :deals, MyApp.Deal
+
+          identity :unique_email, [:email]
         end
       end
 
@@ -37,6 +39,12 @@ defmodule Kumi.Resource do
   accepts `options:`. Any other option key raises `ArgumentError` at
   compile time — there's no silent fallback, so a typo like `requried:`
   is caught instead of quietly compiling as `allow_nil? true`.
+
+  `identity name, [attribute_names]` declares a unique constraint,
+  spelled exactly as Ash spells it, and expands to an `identities do
+  ... end` block (which AshPostgres turns into a unique index named
+  `"<table>_<name>_index"`). It takes no options: `nils_distinct?`,
+  `where`, `eager_check?` and `pre_check?` are escape-hatch territory.
 
   **Escape hatch**: need calculations, aggregates, policies, custom
   actions, or anything else beyond the default four actions? Write the
@@ -188,7 +196,7 @@ defmodule Kumi.Resource do
         {:actions, extras_in(config, [:actions], expected.actions)},
         {:calculations, extras_in(config, [:calculations], [])},
         {:aggregates, extras_in(config, [:aggregates], [])},
-        {:identities, extras_in(config, [:identities], [])}
+        {:identities, extras_in(config, [:identities], expected.identities)}
       ]
       |> Enum.reject(fn {_kind, names} -> names == [] end)
 

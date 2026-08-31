@@ -52,6 +52,12 @@ tag they collapse into that version's section.
 - `Kumi.Resource`, a shorthand that expands to a standard Ash resource,
   plus `mix kumi.expand` to print exactly what it compiles to. A test
   asserts the printed source and the compiled definition agree.
+  `fields do ... end` also takes `identity name, [attributes]`, spelled
+  exactly as Ash spells it, for the unique constraints that nearly every
+  real resource has — without it, a second table was usually enough to
+  force a drop to plain Ash. Identity *options* (`nils_distinct?`,
+  `where`, `eager_check?`, `pre_check?`) stay escape-hatch territory and
+  are rejected with a message pointing at `mix kumi.expand`.
 - `mix kumi.report`, a validation harness that runs format, compile,
   test, `ash.codegen --check` and the plan, then emits a single verdict
   (human-readable or `--json`).

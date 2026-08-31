@@ -8,11 +8,16 @@ defmodule Kumi.Resource.FieldSpec do
   @enforce_keys [:kind, :name, :type]
   defstruct [:kind, :name, :type, opts: []]
 
-  @type kind :: :field | :belongs_to | :has_many
+  @typedoc """
+  What `type` holds depends on `kind`: the field type for `:field`, the
+  destination module for `:belongs_to`/`:has_many`, and the constrained
+  attribute names for `:identity`.
+  """
+  @type kind :: :field | :belongs_to | :has_many | :identity
   @type t :: %__MODULE__{
           kind: kind(),
           name: atom(),
-          type: atom() | module(),
+          type: atom() | module() | [atom()],
           opts: keyword()
         }
 
@@ -89,6 +94,24 @@ defmodule Kumi.Resource.FieldSpec do
     %__MODULE__{kind: :has_many, name: name, type: resolve_module(dest, env), opts: []}
   end
 
+  # Same spelling as Ash's own `identity name, [fields]` (D1: the shorthand's
+  # vocabulary is Ash's vocabulary, so `mix kumi.expand` prints back the
+  # construct the author typed). Options — `nils_distinct?`, `where`,
+  # `eager_check?` — are deliberately not accepted: they drop to plain Ash.
+  defp parse_expr({:identity, _, [name, fields]}, _env)
+       when is_atom(name) and is_list(fields) do
+    unless Enum.all?(fields, &is_atom/1) do
+      raise ArgumentError, identity_bad_fields_message(name, fields)
+    end
+
+    %__MODULE__{kind: :identity, name: name, type: fields}
+  end
+
+  defp parse_expr({:identity, _, [name, fields, _opts]}, _env)
+       when is_atom(name) and is_list(fields) do
+    raise ArgumentError, identity_opts_message(name)
+  end
+
   defp parse_expr(other, _env) do
     raise ArgumentError,
           "Kumi.Resource: unrecognized field declaration inside `fields do ... end`: " <>
@@ -132,6 +155,27 @@ defmodule Kumi.Resource.FieldSpec do
     else
       _ -> raise ArgumentError, image_bad_target_message(name, module)
     end
+  end
+
+  defp identity_bad_fields_message(name, fields) do
+    """
+    Kumi.Resource: `identity #{inspect(name)}, ...` expects a list of attribute \
+    names, got: #{Macro.to_string(fields)}
+
+        identity #{inspect(name)}, [:account_id, :server_day]
+    """
+  end
+
+  defp identity_opts_message(name) do
+    """
+    Kumi.Resource: `identity #{inspect(name)}, [...]` takes no options — the \
+    shorthand only generates a plain unique constraint over the listed \
+    attributes.
+
+    For `nils_distinct?`, `where`, `eager_check?` or `pre_check?`, run \
+    `mix kumi.expand` on this module, paste its output in place of \
+    `fields do ... end`, and add the option there in plain Ash.
+    """
   end
 
   defp image_missing_to_message(name) do
