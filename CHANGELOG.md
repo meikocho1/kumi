@@ -141,6 +141,13 @@ tag they collapse into that version's section.
 Bugs found and fixed during development, listed because each one is a
 trap worth knowing about:
 
+- `mix kumi.plan` reported every column with a numeric or boolean default
+  as permanent, unrepairable drift. Postgres returns those defaults
+  unquoted (`0`, `false`), and only quoted defaults were being read as
+  literals, so the desired and actual sides could never agree. This made
+  `mix kumi.report` unable to reach `ready` on an application that had
+  done nothing wrong.
+
 - `mix kumi.plan` crashed outright on parameterized column types such as
   pgvector's `vector(1536)`, instead of failing closed. Unmapped type
   shapes now surface as an unrecognised change and are classified

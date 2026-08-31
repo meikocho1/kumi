@@ -17,8 +17,29 @@ defmodule Kumi.Schema.Default do
   def from_sql(text) do
     case Regex.run(~r/^'(.*)'::\w+$/s, text) do
       [_, literal] -> {:literal, literal}
-      nil -> :generated
+      nil -> bare_literal(text)
     end
+  end
+
+  # Postgres only quotes defaults that need quoting: `default 0` on an
+  # integer column comes back as the bare `0`, `default false` as `false`.
+  # Ash's side renders those as `{:literal, "0"}` / `{:literal, "false"}`,
+  # so classifying them as `:generated` made every numeric/boolean default
+  # in the database report as permanent, unfixable drift (friction log
+  # P01). Anything that isn't a plain number or boolean — `now()`,
+  # `nextval('seq'::regclass)`, `gen_random_uuid()` — stays `:generated`.
+  defp bare_literal(text) do
+    trimmed =
+      text
+      |> String.trim()
+      |> String.replace(~r/::[\w\s"\.\[\]]+$/, "")
+      |> String.trim()
+      |> String.replace(~r/^\((.*)\)$/s, "\\1")
+      |> String.trim()
+
+    if Regex.match?(~r/^(-?\d+(\.\d+)?|true|false)$/, trimmed),
+      do: {:literal, trimmed},
+      else: :generated
   end
 
   @doc "Desired side: classify an Ash attribute's `default`."

@@ -15,6 +15,24 @@ defmodule Kumi.Schema.DefaultTest do
     test "a function-call / expression default is generated, not literal" do
       assert Default.from_sql("gen_random_uuid()") == :generated
       assert Default.from_sql("(now() AT TIME ZONE 'utc'::text)") == :generated
+      assert Default.from_sql("nextval('things_seq'::regclass)") == :generated
+    end
+
+    # Friction log P01: Postgres returns numbers and booleans unquoted, so
+    # these have to match `from_ash/1`'s `{:literal, "0"}` — otherwise every
+    # `default 0` column reports as permanent drift.
+    test "an unquoted number or boolean is a literal, not generated" do
+      assert Default.from_sql("0") == {:literal, "0"}
+      assert Default.from_sql("-1") == {:literal, "-1"}
+      assert Default.from_sql("0.00") == {:literal, "0.00"}
+      assert Default.from_sql("false") == {:literal, "false"}
+      assert Default.from_sql("true") == {:literal, "true"}
+      assert Default.from_sql("(0)::numeric") == {:literal, "0"}
+    end
+
+    test "an unquoted default round-trips against the Ash side" do
+      assert Default.from_sql("0") == Default.from_ash(0)
+      assert Default.from_sql("false") == Default.from_ash(false)
     end
   end
 
