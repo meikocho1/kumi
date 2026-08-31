@@ -35,6 +35,25 @@ tag they collapse into that version's section.
   codes never depend on live data.
 - Timestamp precision drift detection (a `utc_datetime` column that is
   actually `timestamp(6)` in the database, and the reverse).
+- `app do locale :ja end`, and `--locale` on `mix kumi.plan` /
+  `mix kumi.report`, print the prose in Japanese: safety reasons, fix
+  hints, drift markers, the summary and the verdict. What stays English
+  is everything a reader matches rather than reads — the operation lines
+  themselves (table names, column names, Postgres types), the
+  `SAFE`/`REVIEW`/`DANGEROUS` labels, the SQL inside a fix hint, and
+  `--json` output, which must not change language under a script.
+  Safety levels and `--check` exit codes are identical in every locale.
+  The locale is *found*, not named: with no `--app`, the tasks locate the
+  single `Kumi.App` in the project and read its declaration, so `locale
+  :ja` stays one switch instead of becoming a flag on every invocation.
+  Zero apps or several stay in English rather than guessing which one
+  speaks for the repository.
+  Each step's detail follows the locale too (`すべて整形済み`, `ズレなし
+  — DB とアプリの定義が一致しています`), because a report printing
+  `判定: ready` under `all files formatted` is half a translation. Details
+  Kumi did not write — a captured compiler diagnostic, `mix test`'s own
+  summary line — are printed as captured, and `--json` still emits the
+  English string in every locale.
 - Foreign-key delete rules are part of the comparison: `ON DELETE`
   drift between the code's `references` block and the live constraint is
   reported as its own operation, classified REVIEW in both directions
@@ -79,6 +98,24 @@ tag they collapse into that version's section.
   debugging time while building all of the above (`kumi/guides/`).
 
 **`kumi_admin` — the admin**
+
+- The admin speaks the app's language. `app do locale :ja end` switches
+  every string kumi_admin ships, and `admin do labels %{...} end` names
+  your own things — resources, attributes, relationships, workflows,
+  stages, metrics — in free-form text in any language, checked at compile
+  time against what the app actually declares. Whole phrases, not
+  assembled fragments, so a label lands where each language's grammar
+  wants it. An app declaring neither renders exactly as before. A host
+  that wants different wording in the same language passes `strings:` to
+  the router. See `kumi/guides/i18n.md`.
+
+- The dashboard is a grid of stat cards: each metric is a small label
+  over a large number, sized to scan rather than to read. It used to be a
+  bulleted `name: value` list inside one narrow card — the only screen in
+  the admin that had not been designed. Workflow stage counts render
+  through the same component, because on this page a stage and a metric
+  are the same thing: a name and a number. A policy-forbidden read still
+  shows every declared metric and stage with `—` as its value.
 
 - A LiveView admin whose sidebar, tables, forms, search and dashboard are
   derived from the App DSL, with no per-resource host code.

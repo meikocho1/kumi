@@ -102,7 +102,12 @@ defmodule KumiAdmin.ResourceShowLiveTest do
   describe "handle_event(\"delete\", ...) guard against a nil record (L5)" do
     test "flashes the permission message instead of crashing when record is nil" do
       socket = %Phoenix.LiveView.Socket{
-        assigns: %{__changed__: %{}, flash: %{}, record: nil}
+        assigns: %{
+          __changed__: %{},
+          flash: %{},
+          record: nil,
+          text: KumiAdmin.Text.new(KumiAdmin.Test.App)
+        }
       }
 
       {:noreply, socket} = ResourceShowLive.handle_event("delete", %{}, socket)

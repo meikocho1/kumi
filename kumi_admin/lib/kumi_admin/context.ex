@@ -2,8 +2,9 @@ defmodule KumiAdmin.Context do
   @moduledoc """
   Shared session/param resolution used by every KumiAdmin LiveView —
   reads back what `KumiAdmin.Router.kumi_admin/2` put in the LiveView
-  session (`app`, `mount_path`, the actor function) and resolves the actor
-  and (when present) the `:resource` route param.
+  session (`app`, `mount_path`, the actor function) and resolves the actor,
+  the app's display text (`KumiAdmin.Text`, resolved once per mount rather
+  than per render) and, when present, the `:resource` route param.
   """
 
   @type t :: %{
@@ -14,7 +15,8 @@ defmodule KumiAdmin.Context do
           sign_in_path: String.t(),
           user_resource: module() | nil,
           register_path: String.t(),
-          resource: module() | nil
+          resource: module() | nil,
+          text: KumiAdmin.Text.t()
         }
 
   @spec resolve(map(), map(), Phoenix.LiveView.Socket.t()) :: t()
@@ -27,6 +29,7 @@ defmodule KumiAdmin.Context do
     register_path = Map.get(session, "kumi_admin_register_path", "/register")
     actor = KumiAdmin.Actor.resolve(session["kumi_admin_actor"], socket)
     resource = params["resource"] && KumiAdmin.Slug.resolve(app, params["resource"])
+    strings = Map.get(session, "kumi_admin_strings", %{})
 
     %{
       app: app,
@@ -36,7 +39,8 @@ defmodule KumiAdmin.Context do
       sign_in_path: sign_in_path,
       user_resource: user_resource,
       register_path: register_path,
-      resource: resource
+      resource: resource,
+      text: KumiAdmin.Text.new(app, strings)
     }
   end
 end

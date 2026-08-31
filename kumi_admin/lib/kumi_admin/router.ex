@@ -36,6 +36,10 @@ defmodule KumiAdmin.Router do
       `KumiAdmin.Gate`.
     * `:register_path` — redirect target for the zero-users case above.
       Defaults to `"/register"`.
+    * `:strings` — chrome-string overrides, per locale, merged over
+      `KumiAdmin.Locale.table/0`: `%{ja: %{new: "登録"}}`. Only the keys
+      given change. The *language* comes from the app's own
+      `app do locale ... end`, not from here.
     * `:live_session_name` — defaults to `:kumi_admin`.
 
   ## Requirements on managed resources
@@ -77,13 +81,23 @@ defmodule KumiAdmin.Router do
       user_resource = Keyword.get(opts, :user_resource, nil)
       register_path = Keyword.get(opts, :register_path, "/register")
       on_mount_hooks = Keyword.get(opts, :on_mount, [])
+      strings = Keyword.get(opts, :strings, %{})
       live_session_name = Keyword.get(opts, :live_session_name, :kumi_admin)
 
       live_session live_session_name,
         on_mount: on_mount_hooks,
         session:
           {KumiAdmin.Router, :__session__,
-           [path, app, actor_fun, sign_out_path, sign_in_path, user_resource, register_path]} do
+           [
+             path,
+             app,
+             actor_fun,
+             sign_out_path,
+             sign_in_path,
+             user_resource,
+             register_path,
+             strings
+           ]} do
         live path, KumiAdmin.DashboardLive, :dashboard
         live "#{path}/:resource", KumiAdmin.ResourceIndexLive, :index
         live "#{path}/:resource/new", KumiAdmin.ResourceFormLive, :new
@@ -102,7 +116,8 @@ defmodule KumiAdmin.Router do
         sign_out_path,
         sign_in_path,
         user_resource,
-        register_path
+        register_path,
+        strings
       ) do
     conn
     |> Plug.Conn.get_session()
@@ -113,5 +128,6 @@ defmodule KumiAdmin.Router do
     |> Map.put("kumi_admin_sign_in_path", sign_in_path)
     |> Map.put("kumi_admin_user_resource", user_resource)
     |> Map.put("kumi_admin_register_path", register_path)
+    |> Map.put("kumi_admin_strings", strings)
   end
 end

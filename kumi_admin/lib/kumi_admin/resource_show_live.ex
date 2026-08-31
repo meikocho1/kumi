@@ -35,7 +35,8 @@ defmodule KumiAdmin.ResourceShowLive do
           |> assign(
             app: context.app,
             mount_path: context.mount_path,
-            sign_out_path: context.sign_out_path
+            sign_out_path: context.sign_out_path,
+            text: context.text
           )
           |> assign(actor: context.actor, resource: context.resource)
           |> load_record(params["id"])
@@ -50,7 +51,7 @@ defmodule KumiAdmin.ResourceShowLive do
   # the Delete button isn't rendered there. Guard it rather than let
   # `Ash.destroy(nil, ...)` crash the process (L5).
   def handle_event("delete", _params, %{assigns: %{record: nil}} = socket) do
-    {:noreply, put_flash(socket, :error, "You don't have permission to do that.")}
+    {:noreply, put_flash(socket, :error, t(socket, :forbidden))}
   end
 
   def handle_event("delete", _params, socket) do
@@ -58,7 +59,7 @@ defmodule KumiAdmin.ResourceShowLive do
       :ok ->
         {:noreply,
          socket
-         |> put_flash(:info, "Deleted.")
+         |> put_flash(:info, t(socket, :deleted))
          |> push_navigate(
            to:
              "#{socket.assigns.mount_path}/#{KumiAdmin.Slug.for_resource(socket.assigns.resource)}"
@@ -67,14 +68,14 @@ defmodule KumiAdmin.ResourceShowLive do
       {:ok, _record} ->
         {:noreply,
          socket
-         |> put_flash(:info, "Deleted.")
+         |> put_flash(:info, t(socket, :deleted))
          |> push_navigate(
            to:
              "#{socket.assigns.mount_path}/#{KumiAdmin.Slug.for_resource(socket.assigns.resource)}"
          )}
 
       {:error, _reason} ->
-        {:noreply, put_flash(socket, :error, "You don't have permission to do that.")}
+        {:noreply, put_flash(socket, :error, t(socket, :forbidden))}
     end
   end
 
@@ -150,6 +151,8 @@ defmodule KumiAdmin.ResourceShowLive do
         end
     end
   end
+
+  defp t(socket, key), do: KumiAdmin.Text.string(socket.assigns.text, key)
 
   defp forbidden_record_state(socket) do
     assign(socket,
@@ -254,10 +257,10 @@ defmodule KumiAdmin.ResourceShowLive do
     "#{name} · #{KumiAdmin.Format.truncate_id(record.id)}"
   end
 
-  defp relation_items(relationships, record) do
+  defp relation_items(text, resource, relationships, record) do
     Enum.map(relationships, fn relationship ->
       %{
-        label: Phoenix.Naming.humanize(relationship.name),
+        label: KumiAdmin.Text.field(text, resource, relationship.name),
         display: relationship_display(Map.get(record, relationship.name), relationship)
       }
     end)
@@ -267,6 +270,7 @@ defmodule KumiAdmin.ResourceShowLive do
     ~H"""
     <Shell.shell
       app={@app}
+      text={@text}
       mount_path={@mount_path}
       active_resource={@resource}
       actor={@actor}
@@ -277,11 +281,17 @@ defmodule KumiAdmin.ResourceShowLive do
         :if={@resource}
         href={"#{@mount_path}/#{KumiAdmin.Slug.for_resource(@resource)}"}
       >
-        Back to {KumiAdmin.Label.plural(@resource)}
+        {KumiAdmin.Text.string(@text, :back_to, name: KumiAdmin.Text.resource(@text, @resource))}
       </Atoms.back_link>
 
-      <Atoms.empty :if={@error == :not_found} text="Unknown resource." />
-      <Atoms.empty :if={@error == :forbidden} text="No access or no record." />
+      <Atoms.empty
+        :if={@error == :not_found}
+        text={KumiAdmin.Text.string(@text, :unknown_resource)}
+      />
+      <Atoms.empty
+        :if={@error == :forbidden}
+        text={KumiAdmin.Text.string(@text, :no_access_or_record)}
+      />
 
       <div :if={is_nil(@error)}>
         <Organisms.record_header
@@ -293,15 +303,15 @@ defmodule KumiAdmin.ResourceShowLive do
               :if={@can_update?}
               href={"#{@mount_path}/#{KumiAdmin.Slug.for_resource(@resource)}/#{@record.id}/edit"}
             >
-              Edit
+              {KumiAdmin.Text.string(@text, :edit)}
             </Atoms.button>
             <Atoms.button
               :if={@can_destroy?}
               variant="danger"
               phx-click="delete"
-              data-confirm="Are you sure?"
+              data-confirm={KumiAdmin.Text.string(@text, :confirm_delete)}
             >
-              Delete
+              {KumiAdmin.Text.string(@text, :delete)}
             </Atoms.button>
           </:actions>
         </Organisms.record_header>
@@ -310,14 +320,20 @@ defmodule KumiAdmin.ResourceShowLive do
           attributes={@attributes}
           record={@record}
           foreign_keys={@foreign_keys}
+          text={@text}
+          resource={@resource}
         />
 
-        <Organisms.relation_panel items={relation_items(@relationships, @record)} />
+        <Organisms.relation_panel
+          items={relation_items(@text, @resource, @relationships, @record)}
+          text={@text}
+        />
 
         <Organisms.child_section
           :for={section <- @has_many_sections}
           section={section}
           mount_path={@mount_path}
+          text={@text}
         />
       </div>
     </Shell.shell>

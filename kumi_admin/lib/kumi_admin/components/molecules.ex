@@ -46,8 +46,32 @@ defmodule KumiAdmin.Components.Molecules do
     """
   end
 
+  attr :title, :string, required: true
+  attr :rows, :list, required: true
+
+  @doc """
+  A titled grid of `{label, value}` pairs — the dashboard's shape.
+
+  Both halves arrive display-ready: the caller has already resolved the
+  labels through `KumiAdmin.Text` and formatted the values (including the
+  `"—"` a policy-forbidden read renders). This component only lays them
+  out, so a metric and a workflow stage look the same on the page because
+  they *are* the same thing here.
+  """
+  def stat_grid(assigns) do
+    ~H"""
+    <section class="kumi-admin-stats">
+      <Atoms.section_title text={@title} />
+      <div class="kumi-admin-stat-grid">
+        <Atoms.stat :for={{label, value} <- @rows} label={label} value={value} />
+      </div>
+    </section>
+    """
+  end
+
   attr :columns, :list, required: true
   attr :rows, :list, required: true
+  attr :headers, :list, default: nil
   slot :cell, required: true
 
   def data_table(assigns) do
@@ -55,7 +79,7 @@ defmodule KumiAdmin.Components.Molecules do
     <table class="kumi-admin-table">
       <thead>
         <tr>
-          <th :for={column <- @columns}>{Phoenix.Naming.humanize(column)}</th>
+          <th :for={header <- headers(assigns)}>{header}</th>
         </tr>
       </thead>
       <tbody>
@@ -66,4 +90,12 @@ defmodule KumiAdmin.Components.Molecules do
     </table>
     """
   end
+
+  # `headers` overrides the derived column names — that's where a
+  # `Kumi.App` label lands. Without it the columns humanize themselves, so
+  # a caller with no app in hand still renders sensible English.
+  defp headers(%{headers: nil, columns: columns}),
+    do: Enum.map(columns, &Phoenix.Naming.humanize/1)
+
+  defp headers(%{headers: headers}), do: headers
 end

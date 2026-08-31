@@ -15,7 +15,12 @@ defmodule KumiAdmin.ShellTest do
 
   defp page(assigns) do
     ~H"""
-    <KumiAdmin.Components.Shell.shell app={App} mount_path="/admin" actor={@actor}>
+    <KumiAdmin.Components.Shell.shell
+      app={App}
+      text={KumiAdmin.Text.new(App)}
+      mount_path="/admin"
+      actor={@actor}
+    >
       body-content
     </KumiAdmin.Components.Shell.shell>
     """

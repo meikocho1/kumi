@@ -225,6 +225,10 @@ defmodule KumiAdmin.Test.App do
   admin do
     navigation([KumiAdmin.Test.Account, KumiAdmin.Test.Contact])
   end
+
+  dashboard :overview do
+    metric(:account_count, resource: KumiAdmin.Test.Account)
+  end
 end
 
 defmodule KumiAdmin.Test.Credential do
@@ -251,5 +255,38 @@ defmodule KumiAdmin.Test.Credential do
 
   relationships do
     belongs_to :account, KumiAdmin.Test.Account, public?: true
+  end
+end
+
+defmodule KumiAdmin.Test.JaApp do
+  @moduledoc "Fixture `Kumi.App` declared in Japanese — `locale :ja` plus labels for a resource and one of its attributes, for the i18n tests."
+
+  use Kumi.App
+
+  app do
+    name :ja_fixture
+    title("ためしアプリ")
+    locale(:ja)
+  end
+
+  resources do
+    resource KumiAdmin.Test.Account
+    resource KumiAdmin.Test.Contact
+  end
+
+  admin do
+    navigation([KumiAdmin.Test.Account, KumiAdmin.Test.Contact])
+
+    labels(%{
+      KumiAdmin.Test.Account => "取引先",
+      {KumiAdmin.Test.Account, :name} => "名称",
+      KumiAdmin.Test.Contact => "担当者",
+      :overview => "概要",
+      {:overview, :account_count} => "取引先数"
+    })
+  end
+
+  dashboard :overview do
+    metric(:account_count, resource: KumiAdmin.Test.Account)
   end
 end

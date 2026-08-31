@@ -60,7 +60,8 @@ defmodule KumiAdmin.ResourceFormLiveTest do
           attribute: account_field.attribute,
           options: [],
           upload: nil,
-          current_url: nil
+          current_url: nil,
+          text: KumiAdmin.Text.new(KumiAdmin.Test.App)
         })
 
       refute html =~ ~s(<option value="")
@@ -78,7 +79,8 @@ defmodule KumiAdmin.ResourceFormLiveTest do
           attribute: account_field.attribute,
           options: [],
           upload: nil,
-          current_url: nil
+          current_url: nil,
+          text: KumiAdmin.Text.new(KumiAdmin.Test.App)
         })
 
       assert html =~ ~s(<option value="")
@@ -88,7 +90,12 @@ defmodule KumiAdmin.ResourceFormLiveTest do
   describe "handle_event(\"save\", ...) guard against a nil form (L5)" do
     test "flashes the permission message instead of crashing when form is nil" do
       socket = %Phoenix.LiveView.Socket{
-        assigns: %{__changed__: %{}, flash: %{}, form: nil}
+        assigns: %{
+          __changed__: %{},
+          flash: %{},
+          form: nil,
+          text: KumiAdmin.Text.new(KumiAdmin.Test.App)
+        }
       }
 
       {:noreply, socket} = ResourceFormLive.handle_event("save", %{"form" => %{}}, socket)

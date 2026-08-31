@@ -7,6 +7,10 @@ defmodule KumiAdmin.Components.OrganismsTest do
   alias KumiAdmin.Components.Organisms
   alias KumiAdmin.Test.{Contact, Widget}
 
+  # The English default: an app declaring no locale and no labels, so these
+  # tests keep asserting the derived wording.
+  @text KumiAdmin.Text.new(KumiAdmin.Test.App)
+
   test "record_header/1 renders the label, subtitle, and actions slot" do
     html =
       render_html(fn assigns ->
@@ -30,10 +34,15 @@ defmodule KumiAdmin.Components.OrganismsTest do
 
     html =
       render_html(fn assigns ->
-        assigns = assign(assigns, attributes: attributes, record: record)
+        assigns = assign(assigns, attributes: attributes, record: record, text: @text)
 
         ~H"""
-        <Organisms.attribute_panel attributes={@attributes} record={@record} />
+        <Organisms.attribute_panel
+          attributes={@attributes}
+          record={@record}
+          text={@text}
+          resource={Widget}
+        />
         """
       end)
 
@@ -51,8 +60,10 @@ defmodule KumiAdmin.Components.OrganismsTest do
     test "renders nothing at all when there are no items" do
       html =
         render_html(fn assigns ->
+          assigns = assign(assigns, :text, @text)
+
           ~H"""
-          <Organisms.relation_panel items={[]} />
+          <Organisms.relation_panel items={[]} text={@text} />
           """
         end)
 
@@ -67,10 +78,10 @@ defmodule KumiAdmin.Components.OrganismsTest do
 
       html =
         render_html(fn assigns ->
-          assigns = assign(assigns, :items, items)
+          assigns = assigns |> assign(:items, items) |> assign(:text, @text)
 
           ~H"""
-          <Organisms.relation_panel items={@items} />
+          <Organisms.relation_panel items={@items} text={@text} />
           """
         end)
 
@@ -102,10 +113,10 @@ defmodule KumiAdmin.Components.OrganismsTest do
 
       html =
         render_html(fn assigns ->
-          assigns = assign(assigns, :section, section)
+          assigns = assigns |> assign(:section, section) |> assign(:text, @text)
 
           ~H"""
-          <Organisms.child_section section={@section} mount_path="/admin" />
+          <Organisms.child_section section={@section} mount_path="/admin" text={@text} />
           """
         end)
 
@@ -122,10 +133,10 @@ defmodule KumiAdmin.Components.OrganismsTest do
 
       html =
         render_html(fn assigns ->
-          assigns = assign(assigns, :section, section)
+          assigns = assigns |> assign(:section, section) |> assign(:text, @text)
 
           ~H"""
-          <Organisms.child_section section={@section} mount_path="/admin" />
+          <Organisms.child_section section={@section} mount_path="/admin" text={@text} />
           """
         end)
 
@@ -139,10 +150,10 @@ defmodule KumiAdmin.Components.OrganismsTest do
 
       html =
         render_html(fn assigns ->
-          assigns = assign(assigns, :section, section)
+          assigns = assigns |> assign(:section, section) |> assign(:text, @text)
 
           ~H"""
-          <Organisms.child_section section={@section} mount_path="/admin" />
+          <Organisms.child_section section={@section} mount_path="/admin" text={@text} />
           """
         end)
 
@@ -157,10 +168,10 @@ defmodule KumiAdmin.Components.OrganismsTest do
 
       html =
         render_html(fn assigns ->
-          assigns = assign(assigns, :section, section)
+          assigns = assigns |> assign(:section, section) |> assign(:text, @text)
 
           ~H"""
-          <Organisms.child_section section={@section} mount_path="/admin" />
+          <Organisms.child_section section={@section} mount_path="/admin" text={@text} />
           """
         end)
 

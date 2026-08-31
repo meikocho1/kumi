@@ -11,6 +11,7 @@ defmodule KumiAdmin.Components.Shell do
   alias Kumi.App.Info
 
   attr :app, :atom, required: true
+  attr :text, KumiAdmin.Text, required: true
   attr :mount_path, :string, required: true
   attr :active_resource, :atom, default: nil
   attr :actor, :any, default: nil
@@ -37,7 +38,7 @@ defmodule KumiAdmin.Components.Shell do
                 resource == @active_resource && "kumi-admin-nav-active"
               ]}
             >
-              {KumiAdmin.Label.plural(resource)}
+              {KumiAdmin.Text.resource(@text, resource)}
             </a>
           </li>
         </ul>
@@ -45,14 +46,16 @@ defmodule KumiAdmin.Components.Shell do
       <div class="kumi-admin-main">
         <header class="kumi-admin-topbar">
           <span class="kumi-admin-topbar-title">
-            {(@active_resource && KumiAdmin.Label.plural(@active_resource)) ||
+            {(@active_resource && KumiAdmin.Text.resource(@text, @active_resource)) ||
               Info.title(@app) || to_string(Info.name(@app))}
           </span>
           <div :if={@actor} class="kumi-admin-topbar-user">
             <span :if={actor_email(@actor)} class="kumi-admin-topbar-email">
               {actor_email(@actor)}
             </span>
-            <a href={@sign_out_path} class="kumi-admin-signout">Sign out</a>
+            <a href={@sign_out_path} class="kumi-admin-signout">
+              {KumiAdmin.Text.string(@text, :sign_out)}
+            </a>
           </div>
         </header>
         <main class="kumi-admin-content">
@@ -133,6 +136,12 @@ defmodule KumiAdmin.Components.Shell do
     .kumi-admin-footer { margin-top: auto; padding-top: 1.5rem; display: flex; align-items: center; justify-content: flex-end; gap: 0.35rem; font-size: 12px; color: var(--kumi-text-muted); }
     .kumi-admin-title { font-size: 1.25rem; font-weight: 600; margin: 0 0 1rem; color: var(--kumi-text); }
     .kumi-admin-card { background: var(--kumi-surface); border: 1px solid var(--kumi-border); border-radius: var(--kumi-radius); padding: 1rem 1.25rem; margin-bottom: 1rem; max-width: 320px; }
+    .kumi-admin-stats { margin-bottom: 1.5rem; }
+    .kumi-admin-stats .kumi-admin-section-title { margin-bottom: 0.6rem; }
+    .kumi-admin-stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.75rem; }
+    .kumi-admin-stat { background: var(--kumi-surface); border: 1px solid var(--kumi-border); border-radius: var(--kumi-radius); padding: 0.85rem 1rem; display: flex; flex-direction: column; gap: 0.25rem; }
+    .kumi-admin-stat-label { font-size: 12px; color: var(--kumi-text-muted); }
+    .kumi-admin-stat-value { font-size: 1.75rem; font-weight: 600; line-height: 1.15; font-variant-numeric: tabular-nums; }
     .kumi-admin-table { border-collapse: collapse; width: 100%; background: var(--kumi-surface); border: 1px solid var(--kumi-border); border-radius: var(--kumi-radius); overflow: hidden; }
     .kumi-admin-table th { text-align: left; padding: 0.6rem 0.9rem; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--kumi-text-muted); border-bottom: 1px solid var(--kumi-border); background: #fafbfc; }
     .kumi-admin-table td { text-align: left; padding: 0.65rem 0.9rem; border-bottom: 1px solid var(--kumi-border); }

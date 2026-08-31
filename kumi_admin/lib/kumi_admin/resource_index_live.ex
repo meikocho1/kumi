@@ -40,7 +40,8 @@ defmodule KumiAdmin.ResourceIndexLive do
           |> assign(
             app: context.app,
             mount_path: context.mount_path,
-            sign_out_path: context.sign_out_path
+            sign_out_path: context.sign_out_path,
+            text: context.text
           )
           |> assign(actor: context.actor, resource: context.resource)
           |> assign(
@@ -209,6 +210,7 @@ defmodule KumiAdmin.ResourceIndexLive do
     ~H"""
     <Shell.shell
       app={@app}
+      text={@text}
       mount_path={@mount_path}
       active_resource={@resource}
       actor={@actor}
@@ -216,14 +218,14 @@ defmodule KumiAdmin.ResourceIndexLive do
     >
       <div class="kumi-admin-actions">
         <h1 class="kumi-admin-title">
-          {@resource && KumiAdmin.Label.plural(@resource)}
+          {@resource && KumiAdmin.Text.resource(@text, @resource)}
         </h1>
         <a
           :if={@can_create?}
           href={"#{@mount_path}/#{KumiAdmin.Slug.for_resource(@resource)}/new"}
           class="kumi-admin-button"
         >
-          New
+          {KumiAdmin.Text.string(@text, :new)}
         </a>
       </div>
 
@@ -238,17 +240,17 @@ defmodule KumiAdmin.ResourceIndexLive do
           type="search"
           name="q"
           value={@search}
-          placeholder="Search…"
+          placeholder={KumiAdmin.Text.string(@text, :search_placeholder)}
           class="kumi-admin-input"
         />
       </form>
 
       <p :if={@error == :not_found} class="kumi-admin-empty">
-        Unknown resource.
+        {KumiAdmin.Text.string(@text, :unknown_resource)}
       </p>
 
       <p :if={@error == :forbidden} class="kumi-admin-empty">
-        No access or no records.
+        {KumiAdmin.Text.string(@text, :no_access_or_records)}
       </p>
 
       <%!-- A filter-based read policy (the default) makes an unauthorized
@@ -258,13 +260,15 @@ defmodule KumiAdmin.ResourceIndexLive do
       "the table is empty" would send an operator who owns nothing on a
       tenant off to create duplicates. --%>
       <p :if={is_nil(@error) and @records == []} class="kumi-admin-empty">
-        No records visible to you.
+        {KumiAdmin.Text.string(@text, :no_records)}
       </p>
 
       <table :if={is_nil(@error) and @records != []} class="kumi-admin-table">
         <thead>
           <tr>
-            <th :for={column <- @columns}>{Phoenix.Naming.humanize(column)}</th>
+            <th :for={column <- @columns}>
+              {KumiAdmin.Text.field(@text, @resource, column)}
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -289,8 +293,12 @@ defmodule KumiAdmin.ResourceIndexLive do
       </table>
 
       <div :if={is_nil(@error) and @records != []} class="kumi-admin-pagination">
-        <button phx-click="prev" disabled={@offset == 0}>Prev</button>
-        <button phx-click="next" disabled={!@has_more?}>Next</button>
+        <button phx-click="prev" disabled={@offset == 0}>
+          {KumiAdmin.Text.string(@text, :prev)}
+        </button>
+        <button phx-click="next" disabled={!@has_more?}>
+          {KumiAdmin.Text.string(@text, :next)}
+        </button>
       </div>
     </Shell.shell>
     """

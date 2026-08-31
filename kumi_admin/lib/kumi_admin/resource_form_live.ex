@@ -32,7 +32,8 @@ defmodule KumiAdmin.ResourceFormLive do
           |> assign(
             app: context.app,
             mount_path: context.mount_path,
-            sign_out_path: context.sign_out_path
+            sign_out_path: context.sign_out_path,
+            text: context.text
           )
           |> assign(actor: context.actor, resource: context.resource)
           |> load_form(params["id"])
@@ -52,7 +53,7 @@ defmodule KumiAdmin.ResourceFormLive do
   # though the Save button isn't rendered there. Guard it rather than let
   # `AshPhoenix.Form.submit(nil, ...)` crash the process (L5).
   def handle_event("save", _params, %{assigns: %{form: nil}} = socket) do
-    {:noreply, put_flash(socket, :error, "You don't have permission to do that.")}
+    {:noreply, put_flash(socket, :error, t(socket, :forbidden))}
   end
 
   def handle_event("save", %{"form" => params}, socket) do
@@ -61,22 +62,29 @@ defmodule KumiAdmin.ResourceFormLive do
         case AshPhoenix.Form.submit(socket.assigns.form, params: params) do
           {:ok, record} ->
             slug = KumiAdmin.Slug.for_resource(socket.assigns.resource)
-            verb = if socket.assigns.mode == :new, do: "created", else: "updated"
+            key = if socket.assigns.mode == :new, do: :created, else: :updated
+
+            # Whole-phrase templates, not "#{noun} #{verb}." — the noun's
+            # position and the particle after it differ per language.
+            flash =
+              KumiAdmin.Text.string(socket.assigns.text, key,
+                name: KumiAdmin.Text.resource(socket.assigns.text, socket.assigns.resource)
+              )
 
             {:noreply,
              socket
-             |> put_flash(:info, "#{Phoenix.Naming.humanize(slug)} #{verb}.")
+             |> put_flash(:info, flash)
              |> push_navigate(to: "#{socket.assigns.mount_path}/#{slug}/#{record.id}")}
 
           {:error, form} ->
             {:noreply,
              socket
-             |> put_flash(:error, submit_error_message(form))
+             |> put_flash(:error, t(socket, submit_error_key(form)))
              |> assign(form: form)}
         end
 
-      {:error, message} ->
-        {:noreply, put_flash(socket, :error, message)}
+      {:error, key} ->
+        {:noreply, put_flash(socket, :error, t(socket, key))}
     end
   end
 
@@ -144,17 +152,17 @@ defmodule KumiAdmin.ResourceFormLive do
     case result do
       [] -> {:ok, nil}
       [{:ok, attachment} | _] -> {:ok, attachment}
-      [{:error, _reason} | _] -> {:error, "You don't have permission to do that."}
+      [{:error, _reason} | _] -> {:error, :forbidden}
     end
   end
 
   # A submit failure with no field-attributable errors is, in practice, a
   # policy-forbidden action rather than bad input — AshPhoenix.Form only
   # attaches errors to fields it recognizes from the changeset/query.
-  defp submit_error_message(form) do
+  defp submit_error_key(form) do
     case AshPhoenix.Form.errors(form) do
-      [] -> "You don't have permission to do that."
-      _ -> "Please fix the errors below."
+      [] -> :forbidden
+      _ -> :fix_errors
     end
   end
 
@@ -386,6 +394,7 @@ defmodule KumiAdmin.ResourceFormLive do
   attr :options, :list, default: []
   attr :upload, :any, default: nil
   attr :current_url, :any, default: nil
+  attr :text, KumiAdmin.Text, required: true
 
   # Public (not private) so `belongs_to`/select rendering — including the
   # blank-option omission — is directly unit-testable via
@@ -454,24 +463,33 @@ defmodule KumiAdmin.ResourceFormLive do
       </option>
     </select>
     <div :if={match?({:upload, _}, @widget)} class="kumi-admin-upload">
-      <a :if={@current_url} href={@current_url} class="kumi-admin-current-file">Current file</a>
+      <a :if={@current_url} href={@current_url} class="kumi-admin-current-file">
+        {KumiAdmin.Text.string(@text, :current_file)}
+      </a>
       <.live_file_input upload={@upload} />
       <p :for={err <- upload_errors(@upload)} class="kumi-admin-field-error">
-        {upload_error_message(err)}
+        {upload_error_message(@text, err)}
       </p>
     </div>
     """
   end
 
-  defp upload_error_message(:too_large), do: "File is too large."
-  defp upload_error_message(:too_many_files), do: "Only one file allowed."
-  defp upload_error_message(:not_accepted), do: "File type not accepted."
-  defp upload_error_message(reason), do: "Upload error: #{inspect(reason)}"
+  defp upload_error_message(text, :too_large), do: str(text, :upload_too_large)
+  defp upload_error_message(text, :too_many_files), do: str(text, :upload_too_many_files)
+  defp upload_error_message(text, :not_accepted), do: str(text, :upload_not_accepted)
+
+  defp upload_error_message(text, reason),
+    do: str(text, :upload_failed, reason: inspect(reason))
+
+  defp str(text, key, bindings \\ []), do: KumiAdmin.Text.string(text, key, bindings)
+
+  defp t(socket, key), do: KumiAdmin.Text.string(socket.assigns.text, key)
 
   def render(assigns) do
     ~H"""
     <Shell.shell
       app={@app}
+      text={@text}
       mount_path={@mount_path}
       active_resource={@resource}
       actor={@actor}
@@ -483,19 +501,21 @@ defmodule KumiAdmin.ResourceFormLive do
         href={"#{@mount_path}/#{KumiAdmin.Slug.for_resource(@resource)}"}
         class="kumi-admin-back-link"
       >
-        &larr; Back to {KumiAdmin.Label.plural(@resource)}
+        &larr; {KumiAdmin.Text.string(@text, :back_to,
+          name: KumiAdmin.Text.resource(@text, @resource)
+        )}
       </a>
 
       <p :if={@error == :not_found} class="kumi-admin-empty">
-        Unknown resource.
+        {KumiAdmin.Text.string(@text, :unknown_resource)}
       </p>
 
       <p :if={@error == :forbidden} class="kumi-admin-empty">
-        No access or no record.
+        {KumiAdmin.Text.string(@text, :no_access_or_record)}
       </p>
 
       <p :if={@error == :no_action} class="kumi-admin-empty">
-        This resource doesn't support that action.
+        {KumiAdmin.Text.string(@text, :unsupported_action)}
       </p>
 
       <.form
@@ -507,7 +527,7 @@ defmodule KumiAdmin.ResourceFormLive do
       >
         <div :for={field <- @fields} class="kumi-admin-field">
           <label class="kumi-admin-field-label" for={@form[field.attribute.name].id}>
-            {Phoenix.Naming.humanize(field.attribute.name)}
+            {KumiAdmin.Text.field(@text, @resource, field.attribute.name)}
           </label>
           <.field_input
             field={@form[field.attribute.name]}
@@ -516,13 +536,16 @@ defmodule KumiAdmin.ResourceFormLive do
             options={Map.get(@belongs_to_options, field.attribute.name, [])}
             upload={upload_config(Map.get(assigns, :uploads, %{}), field.widget)}
             current_url={current_attachment_url(@record, field.widget)}
+            text={@text}
           />
           <p :for={msg <- @form[field.attribute.name].errors} class="kumi-admin-field-error">
             {translate_error(msg)}
           </p>
         </div>
         <div class="kumi-admin-actions">
-          <button type="submit" class="kumi-admin-button">Save</button>
+          <button type="submit" class="kumi-admin-button">
+            {KumiAdmin.Text.string(@text, :save)}
+          </button>
         </div>
       </.form>
     </Shell.shell>

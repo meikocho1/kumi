@@ -25,7 +25,9 @@ defmodule KumiAdmin.ResourceIndexLiveTest do
       columns: [:id, :name],
       offset: 0,
       has_more?: false,
-      attachment_relationships: %{}
+      attachment_relationships: %{},
+      foreign_keys: [],
+      text: KumiAdmin.Text.new(KumiAdmin.Test.App)
     }
 
     html = render_component(&ResourceIndexLive.render/1, assigns)

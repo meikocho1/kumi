@@ -29,15 +29,17 @@ defmodule KumiAdmin.Components.Organisms do
   attr :attributes, :list, required: true
   attr :record, :any, required: true
   attr :foreign_keys, :list, default: []
+  attr :text, KumiAdmin.Text, required: true
+  attr :resource, :atom, required: true
 
   def attribute_panel(assigns) do
     ~H"""
     <Molecules.panel>
-      <:header><Atoms.section_title text="Attributes" /></:header>
+      <:header><Atoms.section_title text={KumiAdmin.Text.string(@text, :attributes)} /></:header>
       <div class="kumi-admin-attribute-grid">
         <Molecules.field
           :for={attribute <- @attributes}
-          label={Phoenix.Naming.humanize(attribute.name)}
+          label={KumiAdmin.Text.field(@text, @resource, attribute.name)}
         >
           <% value = Map.get(@record, attribute.name) %>
           <Atoms.badge
@@ -54,11 +56,12 @@ defmodule KumiAdmin.Components.Organisms do
   end
 
   attr :items, :list, required: true
+  attr :text, KumiAdmin.Text, required: true
 
   def relation_panel(assigns) do
     ~H"""
     <Molecules.panel :if={@items != []}>
-      <:header><Atoms.section_title text="Relations" /></:header>
+      <:header><Atoms.section_title text={KumiAdmin.Text.string(@text, :relations)} /></:header>
       <div class="kumi-admin-attribute-grid">
         <Molecules.field :for={item <- @items} label={item.label}>
           <a :if={match?({:link, _, _}, item.display)} href={elem(item.display, 1)}>
@@ -73,22 +76,34 @@ defmodule KumiAdmin.Components.Organisms do
 
   attr :section, :map, required: true
   attr :mount_path, :string, required: true
+  attr :text, KumiAdmin.Text, required: true
 
   def child_section(assigns) do
     ~H"""
     <Molecules.panel>
-      <:header><Atoms.section_title text={KumiAdmin.Label.plural(@section.destination)} /></:header>
-      <Atoms.empty :if={@section.error == :forbidden} text="No access." />
+      <:header>
+        <Atoms.section_title text={KumiAdmin.Text.resource(@text, @section.destination)} />
+      </:header>
+      <Atoms.empty
+        :if={@section.error == :forbidden}
+        text={KumiAdmin.Text.string(@text, :no_access)}
+      />
       <%!-- Same non-committal wording as the top-level index page (M4): a
       filter-based read policy makes an unauthorized child load look
       identical to a genuinely empty relationship. --%>
       <Atoms.empty
         :if={@section.error == nil and @section.rows == []}
-        text="No records visible to you."
+        text={KumiAdmin.Text.string(@text, :no_records)}
       />
       <Molecules.data_table
         :if={@section.error == nil and @section.rows != []}
         columns={@section.columns}
+        headers={
+          Enum.map(
+            @section.columns,
+            &KumiAdmin.Text.field(@text, @section.destination, &1)
+          )
+        }
         rows={@section.rows}
       >
         <:cell :let={%{column: column, row: row}}>
@@ -103,7 +118,10 @@ defmodule KumiAdmin.Components.Organisms do
           </span>
         </:cell>
       </Molecules.data_table>
-      <Atoms.empty :if={@section.error == nil and @section.has_more?} text="…and more." />
+      <Atoms.empty
+        :if={@section.error == nil and @section.has_more?}
+        text={KumiAdmin.Text.string(@text, :and_more)}
+      />
     </Molecules.panel>
     """
   end

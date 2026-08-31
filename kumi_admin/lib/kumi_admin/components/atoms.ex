@@ -64,6 +64,18 @@ defmodule KumiAdmin.Components.Atoms do
     """
   end
 
+  attr :label, :string, required: true
+  attr :value, :string, required: true
+
+  def stat(assigns) do
+    ~H"""
+    <div class="kumi-admin-stat">
+      <span class="kumi-admin-stat-label">{@label}</span>
+      <span class="kumi-admin-stat-value">{@value}</span>
+    </div>
+    """
+  end
+
   attr :text, :string, required: true
 
   def section_title(assigns) do
