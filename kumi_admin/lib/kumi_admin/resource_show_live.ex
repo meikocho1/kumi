@@ -87,6 +87,7 @@ defmodule KumiAdmin.ResourceShowLive do
           attributes: [],
           relationships: [],
           has_many_sections: [],
+          foreign_keys: [],
           can_update?: false,
           can_destroy?: false
         )
@@ -98,7 +99,7 @@ defmodule KumiAdmin.ResourceShowLive do
 
         case Ash.get(resource, id, opts) do
           {:ok, record} ->
-            attributes = Ash.Resource.Info.public_attributes(resource)
+            attributes = KumiAdmin.Attributes.visible(resource)
             related_limit = Kumi.App.Info.related_limit(socket.assigns.app)
             admin_resources = Kumi.App.Info.resources(socket.assigns.app)
 
@@ -119,6 +120,7 @@ defmodule KumiAdmin.ResourceShowLive do
               error: nil,
               record: record,
               attributes: attributes,
+              foreign_keys: KumiAdmin.Attributes.foreign_keys(resource),
               relationships: relationships,
               has_many_sections: has_many_sections,
               can_update?: KumiAdmin.Capability.can_update?(record, socket.assigns.actor),
@@ -154,6 +156,7 @@ defmodule KumiAdmin.ResourceShowLive do
       error: :forbidden,
       record: nil,
       attributes: [],
+      foreign_keys: [],
       relationships: [],
       has_many_sections: [],
       can_update?: false,
@@ -202,6 +205,7 @@ defmodule KumiAdmin.ResourceShowLive do
       # it carries no information on the parent's own page.
       columns:
         KumiAdmin.Columns.for_resource(destination) -- [relationship.destination_attribute],
+      foreign_keys: KumiAdmin.Attributes.foreign_keys(destination),
       linkable?: destination in admin_resources
     }
 
@@ -302,7 +306,11 @@ defmodule KumiAdmin.ResourceShowLive do
           </:actions>
         </Organisms.record_header>
 
-        <Organisms.attribute_panel attributes={@attributes} record={@record} />
+        <Organisms.attribute_panel
+          attributes={@attributes}
+          record={@record}
+          foreign_keys={@foreign_keys}
+        />
 
         <Organisms.relation_panel items={relation_items(@relationships, @record)} />
 

@@ -11,6 +11,7 @@ defmodule KumiAdmin.Test.Domain do
     resource KumiAdmin.Test.Person
     resource KumiAdmin.Test.ReadOnly
     resource KumiAdmin.Test.StrictContact
+    resource KumiAdmin.Test.Credential
   end
 end
 
@@ -223,5 +224,32 @@ defmodule KumiAdmin.Test.App do
 
   admin do
     navigation([KumiAdmin.Test.Account, KumiAdmin.Test.Contact])
+  end
+end
+
+defmodule KumiAdmin.Test.Credential do
+  @moduledoc "Fixture Ash resource for the `sensitive?`/foreign-key derivations (friction log P04/P05): one sensitive attribute, one ordinary `_id`-suffixed business column, and one real `belongs_to` foreign key."
+
+  use Ash.Resource,
+    domain: KumiAdmin.Test.Domain,
+    data_layer: Ash.DataLayer.Ets
+
+  ets do
+    private? true
+  end
+
+  actions do
+    defaults [:read, :destroy, create: :*, update: :*]
+  end
+
+  attributes do
+    uuid_primary_key :id
+    attribute :label, :string, public?: true
+    attribute :external_id, :string, public?: true
+    attribute :api_secret, :string, public?: true, sensitive?: true
+  end
+
+  relationships do
+    belongs_to :account, KumiAdmin.Test.Account, public?: true
   end
 end

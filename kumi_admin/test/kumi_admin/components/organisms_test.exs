@@ -87,6 +87,7 @@ defmodule KumiAdmin.Components.OrganismsTest do
         %{
           destination: Contact,
           columns: [:id, :name],
+          foreign_keys: [],
           linkable?: true,
           rows: [],
           has_more?: false,

@@ -1,6 +1,6 @@
 defmodule KumiAdmin.ResourceIndexLive do
   @moduledoc """
-  Generic resource list: columns from `Ash.Resource.Info.public_attributes/1`
+  Generic resource list: columns from `KumiAdmin.Attributes.visible/1`
   (via `KumiAdmin.Columns`), rows via a plain `Ash.read` with query-level
   `limit`/`offset` and a next/prev control.
 
@@ -109,6 +109,7 @@ defmodule KumiAdmin.ResourceIndexLive do
         assign(socket,
           error: :not_found,
           columns: [],
+          foreign_keys: [],
           attachment_relationships: %{},
           records: [],
           has_more?: false
@@ -132,6 +133,7 @@ defmodule KumiAdmin.ResourceIndexLive do
             assign(socket,
               error: nil,
               columns: columns,
+              foreign_keys: KumiAdmin.Attributes.foreign_keys(resource),
               attachment_relationships: attachment_relationships,
               records: Enum.take(results, @page_size),
               has_more?: length(results) > @page_size
@@ -146,6 +148,7 @@ defmodule KumiAdmin.ResourceIndexLive do
             assign(socket,
               error: :forbidden,
               columns: columns,
+              foreign_keys: KumiAdmin.Attributes.foreign_keys(resource),
               attachment_relationships: attachment_relationships,
               records: [],
               has_more?: false
@@ -271,14 +274,14 @@ defmodule KumiAdmin.ResourceIndexLive do
                 :if={column == :id}
                 href={"#{@mount_path}/#{KumiAdmin.Slug.for_resource(@resource)}/#{record.id}"}
               >
-                {KumiAdmin.Format.cell(column, Map.get(record, column))}
+                {KumiAdmin.Format.cell(column, Map.get(record, column), @foreign_keys)}
               </a>
               <% attachment = attachment_link(record, column, @attachment_relationships) %>
               <a :if={column != :id and attachment} href={elem(attachment, 0)}>
                 {elem(attachment, 1)}
               </a>
               <span :if={column != :id and !attachment}>
-                {KumiAdmin.Format.cell(column, Map.get(record, column))}
+                {KumiAdmin.Format.cell(column, Map.get(record, column), @foreign_keys)}
               </span>
             </td>
           </tr>

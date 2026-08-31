@@ -22,10 +22,24 @@ defmodule KumiAdmin.FormatTest do
     assert Format.cell(:name, "Acme") == "Acme"
   end
 
-  test "cell/2 truncates foreign keys, not other strings" do
+  test "cell/3 truncates the declared foreign keys, not other strings" do
     uuid = "d807c77b-e7a2-4ef1-85c6-a267c46805b9"
 
-    assert Format.cell(:account_id, uuid) == "d807c77b…"
-    assert Format.cell(:name, uuid) == uuid
+    assert Format.cell(:account_id, uuid, [:account_id]) == "d807c77b…"
+    assert Format.cell(:name, uuid, [:account_id]) == uuid
+  end
+
+  # P05: `external_id` / `stripe_customer_id` are ordinary business columns,
+  # not foreign keys — truncating them by name made the value unreadable.
+  test "cell/3 leaves an `_id`-suffixed column that is not a foreign key intact" do
+    assert Format.cell(:external_id, "cus_9f2Ab7QhVzKp", [:account_id]) ==
+             "cus_9f2Ab7QhVzKp"
+  end
+
+  test "cell/2 without a foreign key list truncates nothing but :id" do
+    uuid = "d807c77b-e7a2-4ef1-85c6-a267c46805b9"
+
+    assert Format.cell(:account_id, uuid) == uuid
+    assert Format.cell(:id, uuid) == "d807c77b…"
   end
 end

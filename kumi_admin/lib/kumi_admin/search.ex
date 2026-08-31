@@ -1,7 +1,7 @@
 defmodule KumiAdmin.Search do
   @moduledoc """
   Case-insensitive "contains" search across a resource's string-typed
-  public attributes, OR'd together via Ash's keyword filter syntax
+  public, non-sensitive attributes, OR'd together via Ash's keyword filter syntax
   (`Ash.Query.filter_input/2`, which — unlike `Ash.Query.filter/2` — takes
   plain runtime data, not a macro-time expression, so the field list can
   be built dynamically: `[or: [[name: [contains: term]], [email: [contains: term]]]]`).
@@ -16,7 +16,7 @@ defmodule KumiAdmin.Search do
   @spec searchable_fields(module()) :: [atom()]
   def searchable_fields(resource) do
     resource
-    |> Ash.Resource.Info.public_attributes()
+    |> KumiAdmin.Attributes.visible()
     |> Enum.filter(&(&1.type in [Ash.Type.String, Ash.Type.CiString]))
     |> Enum.map(& &1.name)
   end

@@ -28,6 +28,7 @@ defmodule KumiAdmin.Components.Organisms do
 
   attr :attributes, :list, required: true
   attr :record, :any, required: true
+  attr :foreign_keys, :list, default: []
 
   def attribute_panel(assigns) do
     ~H"""
@@ -41,10 +42,10 @@ defmodule KumiAdmin.Components.Organisms do
           <% value = Map.get(@record, attribute.name) %>
           <Atoms.badge
             :if={is_atom(value) and not is_nil(value) and not is_boolean(value)}
-            text={KumiAdmin.Format.cell(attribute.name, value)}
+            text={KumiAdmin.Format.cell(attribute.name, value, @foreign_keys)}
           />
           <span :if={!(is_atom(value) and not is_nil(value) and not is_boolean(value))}>
-            {KumiAdmin.Format.cell(attribute.name, value)}
+            {KumiAdmin.Format.cell(attribute.name, value, @foreign_keys)}
           </span>
         </Molecules.field>
       </div>
@@ -95,10 +96,10 @@ defmodule KumiAdmin.Components.Organisms do
             :if={column == :id and @section.linkable?}
             href={"#{@mount_path}/#{KumiAdmin.Slug.for_resource(@section.destination)}/#{row.id}"}
           >
-            {KumiAdmin.Format.cell(column, Map.get(row, column))}
+            {KumiAdmin.Format.cell(column, Map.get(row, column), @section.foreign_keys)}
           </a>
           <span :if={column != :id or !@section.linkable?}>
-            {KumiAdmin.Format.cell(column, Map.get(row, column))}
+            {KumiAdmin.Format.cell(column, Map.get(row, column), @section.foreign_keys)}
           </span>
         </:cell>
       </Molecules.data_table>

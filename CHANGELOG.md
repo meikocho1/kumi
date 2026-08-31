@@ -153,6 +153,17 @@ trap worth knowing about:
   literals, so the desired and actual sides could never agree. This made
   `mix kumi.report` unable to reach `ready` on an application that had
   done nothing wrong.
+- The admin ignored `sensitive? true`: the value was rendered on the list
+  and detail pages and was searchable. Sensitive attributes are now
+  dropped from every attribute list the admin derives — columns, detail
+  page, search, and forms. Consequence: a *required* sensitive attribute
+  cannot be filled in from the admin, so set it from the host
+  application's own UI or from `iex`.
+- The admin truncated any string column whose *name* ended in `_id` to 8
+  characters, on the assumption it was a UUID foreign key. Ordinary
+  business columns (`external_id`, `stripe_customer_id`) were unreadable.
+  Truncation now applies only to attributes that actually back a
+  `belongs_to`.
 
 - `mix kumi.plan` crashed outright on parameterized column types such as
   pgvector's `vector(1536)`, instead of failing closed. Unmapped type

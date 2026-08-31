@@ -6,11 +6,13 @@ defmodule KumiAdmin.FormFields do
   resource module (see `KumiAdmin.Test.Widget`/`KumiAdmin.Test.Contact`).
 
   Field list = the intersection of the action's (already-normalized by
-  Ash at compile time) `accept` list and `Ash.Resource.Info.public_attributes/1`,
-  kept in attribute declaration order. A `belongs_to`'s generated foreign
-  key attribute (e.g. `:account_id`) is detected via
-  `Ash.Resource.Info.public_relationships/1` and rendered as a `:belongs_to`
-  select instead of falling through to its raw `:uuid` type.
+  Ash at compile time) `accept` list and `KumiAdmin.Attributes.visible/1`,
+  kept in attribute declaration order — so a `sensitive? true` attribute
+  never reaches a form, in either direction. A `belongs_to`'s generated
+  foreign key attribute (e.g. `:account_id`) is detected via
+  `KumiAdmin.Attributes.belongs_to_by_source_attribute/1` and rendered as
+  a `:belongs_to` select instead of falling through to its raw `:uuid`
+  type.
   """
 
   @text_like_names ~r/body|description|notes?|content|comment/i
@@ -43,22 +45,15 @@ defmodule KumiAdmin.FormFields do
 
       action ->
         accepted = MapSet.new(action.accept)
-        belongs_to = belongs_to_by_source_attribute(resource)
+        belongs_to = KumiAdmin.Attributes.belongs_to_by_source_attribute(resource)
 
         resource
-        |> Ash.Resource.Info.public_attributes()
+        |> KumiAdmin.Attributes.visible()
         |> Enum.filter(&MapSet.member?(accepted, &1.name))
         |> Enum.map(fn attribute ->
           %{attribute: attribute, widget: widget(attribute, belongs_to[attribute.name])}
         end)
     end
-  end
-
-  defp belongs_to_by_source_attribute(resource) do
-    resource
-    |> Ash.Resource.Info.public_relationships()
-    |> Enum.filter(&(&1.type == :belongs_to))
-    |> Map.new(&{&1.source_attribute, &1})
   end
 
   @doc """
