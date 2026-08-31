@@ -137,6 +137,11 @@ defmodule Kumi.Plan.Format do
       "  ~ fk #{desired_fk.column} #{actual_fk.references_table}.#{actual_fk.references_column} -> " <>
         "#{desired_fk.references_table}.#{desired_fk.references_column}"
 
+  defp format_op({:change_fk_on_delete, _table, desired_fk, actual_fk}),
+    do:
+      "  ~ fk #{desired_fk.column} on_delete #{inspect(actual_fk.on_delete)} -> " <>
+        "#{inspect(desired_fk.on_delete)}"
+
   defp format_op({:change_index, _table, desired_idx, actual_idx}),
     do:
       "  ~ index #{desired_idx.name} (#{Enum.join(actual_idx.columns, ", ")})#{unique(actual_idx)} -> " <>

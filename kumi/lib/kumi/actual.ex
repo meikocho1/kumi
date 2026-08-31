@@ -87,12 +87,15 @@ defmodule Kumi.Actual do
 
   defp foreign_keys_by_table(repo) do
     sql = """
-    SELECT tc.table_name, kcu.column_name, ccu.table_name, ccu.column_name, tc.constraint_name
+    SELECT tc.table_name, kcu.column_name, ccu.table_name, ccu.column_name,
+           tc.constraint_name, rc.delete_rule
     FROM information_schema.table_constraints tc
     JOIN information_schema.key_column_usage kcu
       ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
     JOIN information_schema.constraint_column_usage ccu
       ON tc.constraint_name = ccu.constraint_name AND tc.table_schema = ccu.table_schema
+    JOIN information_schema.referential_constraints rc
+      ON tc.constraint_name = rc.constraint_name AND tc.table_schema = rc.constraint_schema
     WHERE tc.constraint_type = 'FOREIGN KEY'
       AND tc.table_schema = 'public'
       AND tc.table_name <> $1
@@ -101,17 +104,26 @@ defmodule Kumi.Actual do
     repo
     |> query!(sql, [@excluded_table])
     |> Enum.group_by(
-      fn [table, _, _, _, _] -> table end,
-      fn [_, column, ref_table, ref_column, name] ->
+      fn [table, _, _, _, _, _] -> table end,
+      fn [_, column, ref_table, ref_column, name, delete_rule] ->
         %ForeignKey{
           name: name,
           column: column,
           references_table: ref_table,
-          references_column: ref_column
+          references_column: ref_column,
+          on_delete: on_delete_from_sql(delete_rule)
         }
       end
     )
   end
+
+  # Translated into Ash's vocabulary rather than reported in Postgres's (D1:
+  # what Kumi prints is what the user wrote). `NO ACTION` — and anything
+  # unrecognised — reads as `:nothing`, which is Postgres's own default.
+  defp on_delete_from_sql("CASCADE"), do: :delete
+  defp on_delete_from_sql("SET NULL"), do: :nilify
+  defp on_delete_from_sql("RESTRICT"), do: :restrict
+  defp on_delete_from_sql(_no_action), do: :nothing
 
   # Built from pg_catalog directly (there's no standard information_schema
   # view for index column lists). `ix.indisprimary = false` excludes the

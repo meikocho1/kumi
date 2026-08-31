@@ -83,6 +83,11 @@ defmodule Kumi.Plan.SQL do
   # as a result — no DDL for these can ever execute via `mix kumi.apply`.
   def render({:change_primary_key, _table, _desired_pk, _actual_pk}), do: :unsupported
   def render({:change_fk, _table, _desired_fk, _actual_fk}), do: :unsupported
+
+  # Two statements (DROP then ADD), and a failure between them leaves the
+  # table with no foreign key at all. Not something to render for unattended
+  # execution — `Kumi.Plan.FixHint` says what to do instead.
+  def render({:change_fk_on_delete, _table, _desired_fk, _actual_fk}), do: :unsupported
   def render({:change_index, _table, _desired_idx, _actual_idx}), do: :unsupported
 
   # All-or-nothing: a single `:default` or `:datetime_precision` change

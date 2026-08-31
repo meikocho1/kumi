@@ -17,6 +17,8 @@ defmodule Kumi.Diff do
           | {:add_fk, String.t(), Kumi.Schema.ForeignKey.t()}
           | {:remove_fk, String.t(), Kumi.Schema.ForeignKey.t()}
           | {:change_fk, String.t(), Kumi.Schema.ForeignKey.t(), Kumi.Schema.ForeignKey.t()}
+          | {:change_fk_on_delete, String.t(), Kumi.Schema.ForeignKey.t(),
+             Kumi.Schema.ForeignKey.t()}
           | {:add_index, String.t(), Kumi.Schema.Index.t()}
           | {:remove_index, String.t(), Kumi.Schema.Index.t()}
           | {:change_index, String.t(), Kumi.Schema.Index.t(), Kumi.Schema.Index.t()}
@@ -120,7 +122,18 @@ defmodule Kumi.Diff do
           fk_target_changed?(desired_fk, actual_fk),
           do: {:change_fk, table, desired_fk, actual_fk}
 
-    adds ++ removes ++ changes
+    # A changed target and a changed delete rule ask the reader for different
+    # work, so they are different operations. Folding them together would
+    # leave every message able to say only "the foreign key changed".
+    on_delete_changes =
+      for {col, desired_fk} <- desired_by_col,
+          actual_fk = actual_by_col[col],
+          not is_nil(actual_fk),
+          not fk_target_changed?(desired_fk, actual_fk),
+          desired_fk.on_delete != actual_fk.on_delete,
+          do: {:change_fk_on_delete, table, desired_fk, actual_fk}
+
+    adds ++ removes ++ changes ++ on_delete_changes
   end
 
   defp fk_target_changed?(desired, actual),

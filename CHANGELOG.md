@@ -35,6 +35,12 @@ tag they collapse into that version's section.
   codes never depend on live data.
 - Timestamp precision drift detection (a `utc_datetime` column that is
   actually `timestamp(6)` in the database, and the reverse).
+- Foreign-key delete rules are part of the comparison: `ON DELETE`
+  drift between the code's `references` block and the live constraint is
+  reported as its own operation, classified REVIEW in both directions
+  (adding a cascade starts deleting rows; removing one makes the parent
+  undeletable) and never rendered as SQL, since repairing it means DROP
+  plus ADD.
 - `mix kumi.apply` repairs SAFE drift in development. Four independent
   gates: the operation must be classified SAFE, must be on an explicit
   allowlist, must render to exact SQL, and must not carry a default or

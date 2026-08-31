@@ -64,5 +64,8 @@ defmodule Kumi.Report.Format do
 
   def describe({:change_fk, table, fk, _actual_fk}), do: "change_fk #{table}.#{fk.column}"
 
+  def describe({:change_fk_on_delete, table, fk, _actual_fk}),
+    do: "change_fk_on_delete #{table}.#{fk.column}"
+
   def describe({:change_index, table, idx, _actual_idx}), do: "change_index #{table}.#{idx.name}"
 end

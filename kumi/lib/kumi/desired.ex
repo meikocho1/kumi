@@ -74,9 +74,21 @@ defmodule Kumi.Desired do
         name: "#{table}_#{rel.source_attribute}_fkey",
         column: to_string(rel.source_attribute),
         references_table: references_table,
-        references_column: to_string(rel.destination_attribute)
+        references_column: to_string(rel.destination_attribute),
+        on_delete: on_delete(resource, rel)
       }
     end)
+  end
+
+  # Without a `postgres do references do reference :x, on_delete: ... end end`
+  # block AshPostgres emits no delete rule at all, so the column gets
+  # Postgres's default (NO ACTION) — read here as `:nothing`, the same value
+  # the actual side produces for it.
+  defp on_delete(resource, rel) do
+    case AshPostgres.DataLayer.Info.reference(resource, rel.name) do
+      %{on_delete: value} when not is_nil(value) -> value
+      _ -> :nothing
+    end
   end
 
   # Two sources of secondary indexes, unioned: Ash `identities` (unique

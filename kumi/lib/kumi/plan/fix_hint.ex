@@ -100,6 +100,15 @@ defmodule Kumi.Plan.FixHint do
     ]
   end
 
+  def lines({:change_fk_on_delete, _table, desired_fk, actual_fk}) do
+    [
+      "fix: #{@codegen}  (code ahead of DB)",
+      "if codegen emits nothing, FK #{desired_fk.column} on_delete drifted " <>
+        "(DB: #{inspect(actual_fk.on_delete)}, code: #{inspect(desired_fk.on_delete)}) — " <>
+        "needs DROP CONSTRAINT #{actual_fk.name} + ADD CONSTRAINT ... ON DELETE ...; apply manually"
+    ]
+  end
+
   def lines({:change_index, _table, desired_idx, actual_idx}) do
     [
       "fix: #{@codegen}  (code ahead of DB)",

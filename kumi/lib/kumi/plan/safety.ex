@@ -97,6 +97,16 @@ defmodule Kumi.Plan.Safety do
        "FK #{desired_fk.column} target changed #{actual_fk.references_table}.#{actual_fk.references_column} -> " <>
          "#{desired_fk.references_table}.#{desired_fk.references_column}"}
 
+  # Never SAFE, in either direction. The constraint has to be replaced, and
+  # both directions change behaviour that matters: dropping `:delete` makes
+  # the parent row undeletable, adding it makes rows disappear that used to
+  # block the delete.
+  def classify({:change_fk_on_delete, _table, desired_fk, actual_fk}),
+    do:
+      {:review,
+       "FK #{desired_fk.column} on_delete changed #{inspect(actual_fk.on_delete)} -> #{inspect(desired_fk.on_delete)} — " <>
+         "needs DROP CONSTRAINT + ADD CONSTRAINT, verify deletes still behave as intended"}
+
   def classify({:change_index, _table, desired_idx, actual_idx}),
     do:
       {:review,
