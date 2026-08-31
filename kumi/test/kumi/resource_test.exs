@@ -286,6 +286,120 @@ defmodule Kumi.ResourceTest do
     end
   end
 
+  # Friction log P16: the one resource that *was* written in the shorthand turned
+  # out to be the one whose parent rows could not be deleted — `belongs_to` emits
+  # a foreign key and there was no way to give it an `ON DELETE`. Unlike a missing
+  # `identity`, this one compiles, migrates and passes every test until someone
+  # deletes an account.
+  describe "belongs_to on_delete in the shorthand" do
+    test "FieldSpec.parse/2 reads `belongs_to name, Dest, on_delete: :delete`" do
+      ast = quote(do: belongs_to(:account, Kumi.Test.ResourceDomain, on_delete: :delete))
+
+      assert [
+               %Kumi.Resource.FieldSpec{
+                 kind: :belongs_to,
+                 name: :account,
+                 opts: [on_delete: :delete]
+               }
+             ] = Kumi.Resource.FieldSpec.parse(ast, __ENV__)
+    end
+
+    test "`required: true` on a belongs_to is now reachable at all" do
+      ast = quote(do: belongs_to(:account, Kumi.Test.ResourceDomain, required: true))
+
+      assert [%Kumi.Resource.FieldSpec{kind: :belongs_to, opts: [required: true]}] =
+               Kumi.Resource.FieldSpec.parse(ast, __ENV__)
+    end
+
+    test "an unknown on_delete value is rejected rather than silently dropped" do
+      ast = quote(do: belongs_to(:account, Kumi.Test.ResourceDomain, on_delete: :cascade))
+
+      assert_raise ArgumentError, ~r/unknown value/, fn ->
+        Kumi.Resource.FieldSpec.parse(ast, __ENV__)
+      end
+    end
+
+    test "an unknown option is rejected" do
+      ast = quote(do: belongs_to(:account, Kumi.Test.ResourceDomain, on_deleet: :delete))
+
+      assert_raise ArgumentError, ~r/unknown option/, fn ->
+        Kumi.Resource.FieldSpec.parse(ast, __ENV__)
+      end
+    end
+
+    test "generate/3 emits a references entry only for the ones that asked" do
+      opts = [domain: Kumi.Test.ResourceDomain, repo: Kumi.Test.Repo, table: "widgets"]
+
+      specs = [
+        %Kumi.Resource.FieldSpec{
+          kind: :belongs_to,
+          name: :account,
+          type: Kumi.Test.Resource.Account,
+          opts: [on_delete: :delete]
+        },
+        %Kumi.Resource.FieldSpec{
+          kind: :belongs_to,
+          name: :group,
+          type: Kumi.Test.Resource.Group,
+          opts: []
+        }
+      ]
+
+      source = Kumi.Resource.Codegen.generate(Kumi.Test.Resource.Widget, opts, specs)
+
+      assert source =~ "references do"
+      assert source =~ "reference(:account, on_delete: :delete)"
+      refute source =~ "reference(:group"
+    end
+
+    test "the emitted DSL is real: AshPostgres reads the reference back" do
+      # Asserting on `generate/3`'s string is not enough: what P16 was missing
+      # was not a character in the output but a declaration the compiled
+      # resource did not carry. So compile it for real and ask AshPostgres
+      # whether it received the reference.
+      source = """
+      defmodule Kumi.Test.Resource.CascadeCheck do
+        use Kumi.Resource,
+          domain: Kumi.Test.ResourceDomain,
+          repo: Kumi.Test.Repo,
+          table: "kumi_test_resource_cascade_check"
+
+        fields do
+          field :note, :string
+          belongs_to :account, Kumi.Test.Resource.Account, on_delete: :delete
+        end
+      end
+      """
+
+      # stderr is captured for the same reason as elsewhere in this file:
+      # compiled standalone, the resource isn't listed in ResourceDomain, and
+      # Ash quite reasonably warns about it.
+      capture_io(:stderr, fn -> Code.compile_string(source) end)
+
+      assert %{on_delete: :delete} =
+               AshPostgres.DataLayer.Info.reference(Kumi.Test.Resource.CascadeCheck, :account)
+    after
+      :code.purge(Kumi.Test.Resource.CascadeCheck)
+      :code.delete(Kumi.Test.Resource.CascadeCheck)
+    end
+
+    test "no references block at all when nothing declares on_delete" do
+      opts = [domain: Kumi.Test.ResourceDomain, repo: Kumi.Test.Repo, table: "widgets"]
+
+      specs = [
+        %Kumi.Resource.FieldSpec{
+          kind: :belongs_to,
+          name: :account,
+          type: Kumi.Test.Resource.Account,
+          opts: []
+        }
+      ]
+
+      refute Kumi.Resource.Codegen.generate(Kumi.Test.Resource.Widget, opts, specs) =~
+               "references do"
+    end
+  end
+
   # Friction log P02: 13 of 14 resources in a real host application dropped
   # out of the shorthand before their first field, because every one of them
   # had a unique constraint and `fields do ... end` had no way to say so.

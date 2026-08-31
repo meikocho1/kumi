@@ -84,7 +84,7 @@ defmodule Kumi.Resource.Codegen do
 
       postgres do
         table #{inspect(table)}
-        repo #{inspect(repo)}
+        repo #{inspect(repo)}#{references_block(belongs_tos)}
       end
 
       actions do
@@ -150,6 +150,31 @@ defmodule Kumi.Resource.Codegen do
 
   defp constraint_line(:email, _opts), do: "constraints match: #{@email_regex_source}"
   defp constraint_line(_type, _opts), do: nil
+
+  # Only a `belongs_to` that asked for `on_delete:` gets a `reference` entry,
+  # and with none of them asking the block is omitted entirely — the
+  # generated source has to read like source someone would write by hand
+  # (D1), and nobody hand-writes an empty `references do ... end`.
+  defp references_block(belongs_tos) do
+    case Enum.filter(belongs_tos, &Keyword.has_key?(&1.opts, :on_delete)) do
+      [] ->
+        ""
+
+      refs ->
+        lines =
+          Enum.map_join(refs, "\n", fn %FieldSpec{name: name, opts: opts} ->
+            "reference #{inspect(name)}, on_delete: #{inspect(Keyword.fetch!(opts, :on_delete))}"
+          end)
+
+        """
+
+
+        references do
+          #{lines}
+        end
+        """
+    end
+  end
 
   defp relationships_block([], []), do: ""
 

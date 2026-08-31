@@ -58,6 +58,12 @@ tag they collapse into that version's section.
   force a drop to plain Ash. Identity *options* (`nils_distinct?`,
   `where`, `eager_check?`, `pre_check?`) stay escape-hatch territory and
   are rejected with a message pointing at `mix kumi.expand`.
+  `belongs_to` takes `required: true` and `on_delete:` (`:delete` /
+  `:nilify` / `:nothing` / `:restrict`, validated at compile time),
+  expanding to an AshPostgres `references` entry. Before this, a
+  shorthand foreign key had no `ON DELETE` rule and no way to be
+  mandatory: the parent row could not be deleted once anything referenced
+  it, and nothing failed until someone tried.
 - `mix kumi.report`, a validation harness that runs format, compile,
   test, `ash.codegen --check` and the plan, then emits a single verdict
   (human-readable or `--json`).

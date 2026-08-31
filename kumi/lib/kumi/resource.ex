@@ -40,6 +40,15 @@ defmodule Kumi.Resource do
   compile time — there's no silent fallback, so a typo like `requried:`
   is caught instead of quietly compiling as `allow_nil? true`.
 
+  `belongs_to name, Dest` takes two options: `required: true`
+  (`allow_nil? false` on the generated foreign key) and `on_delete:`
+  (`:delete` / `:nilify` / `:nothing` / `:restrict`), which expands to an
+  AshPostgres `references do reference ... end` entry. Without
+  `on_delete:` the foreign key carries no `ON DELETE` rule at all, so a
+  parent row cannot be deleted once anything references it — the value is
+  validated at compile time, and only the relationships that ask for one
+  appear in the generated `references` block.
+
   `identity name, [attribute_names]` declares a unique constraint,
   spelled exactly as Ash spells it, and expands to an `identities do
   ... end` block (which AshPostgres turns into a unique index named

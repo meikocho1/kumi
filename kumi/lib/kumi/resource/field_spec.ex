@@ -39,6 +39,19 @@ defmodule Kumi.Resource.FieldSpec do
   # the two for that case.
   @image_field_opts [:to, :required]
 
+  # What a `belongs_to` accepts. `:on_delete` is the delete rule for the
+  # foreign key it generates and expands to AshPostgres's `references do
+  # reference ... end`. Without it the foreign key carries no `ON DELETE`,
+  # which means a parent row cannot be deleted once a single row references
+  # it — found in a real host application, where deleting an account failed
+  # on a foreign key violation and nothing else in the suite noticed
+  # (friction log P16).
+  @belongs_to_opts [:required, :on_delete]
+
+  # The same spellings AshPostgres's `reference` accepts (D1: the
+  # shorthand's vocabulary is Ash's vocabulary).
+  @on_delete_values [:delete, :nilify, :nothing, :restrict]
+
   @doc """
   Parses a `fields do ... end` block's AST into a list of `t()`, resolving
   `belongs_to`/`has_many` destination aliases against `env` (so `alias`ed
@@ -90,6 +103,14 @@ defmodule Kumi.Resource.FieldSpec do
     %__MODULE__{kind: :belongs_to, name: name, type: resolve_module(dest, env), opts: []}
   end
 
+  defp parse_expr({:belongs_to, _, [name, dest, opts]}, env)
+       when is_atom(name) and is_list(opts) do
+    validate_opts!(name, :belongs_to, opts, @belongs_to_opts)
+    validate_on_delete!(name, Keyword.get(opts, :on_delete))
+
+    %__MODULE__{kind: :belongs_to, name: name, type: resolve_module(dest, env), opts: opts}
+  end
+
   defp parse_expr({:has_many, _, [name, dest]}, env) when is_atom(name) do
     %__MODULE__{kind: :has_many, name: name, type: resolve_module(dest, env), opts: []}
   end
@@ -120,6 +141,18 @@ defmodule Kumi.Resource.FieldSpec do
 
   defp allowed_opts_for(:select), do: @select_field_opts
   defp allowed_opts_for(_other), do: @scalar_field_opts
+
+  defp validate_on_delete!(_name, nil), do: :ok
+  defp validate_on_delete!(_name, value) when value in @on_delete_values, do: :ok
+
+  defp validate_on_delete!(name, value) do
+    raise ArgumentError, """
+    Kumi.Resource: `belongs_to #{inspect(name)}, ..., on_delete: #{inspect(value)}` — \
+    unknown value.
+
+    Accepted: #{inspect(@on_delete_values)}
+    """
+  end
 
   defp validate_opts!(name, kind, opts, allowed) do
     case Keyword.keys(opts) -- allowed do
