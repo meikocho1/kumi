@@ -164,7 +164,6 @@ trap worth knowing about:
   business columns (`external_id`, `stripe_customer_id`) were unreadable.
   Truncation now applies only to attributes that actually back a
   `belongs_to`.
-
 - `mix kumi.plan` crashed outright on parameterized column types such as
   pgvector's `vector(1536)`, instead of failing closed. Unmapped type
   shapes now surface as an unrecognised change and are classified

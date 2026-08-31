@@ -24,6 +24,11 @@ a `MyApp.Accounts.User` with the **password** strategy, a `Token`
 resource, a `MyApp.Secrets` module, the `/sign-in` `/register` `/sign-out`
 routes, and a `MyAppWeb.AuthOverrides` styled to match the admin shell.
 
+Those two resources take the table names `users` and `tokens`. If your own
+domain needs one of them — a `tokens` table for device push tokens, say —
+name yours something more specific (`device_tokens`); the generated tables
+are not renamed for you.
+
 Pick different strategies at generate time:
 
 ```bash

@@ -90,6 +90,30 @@ Ash.Changeset.for_create(:register_with_password, attrs,
 )
 ```
 
+**An `upsert?: true` create with `upsert_fields` that resolve to nothing updates nothing — silently.**
+AshPostgres refuses to build an upsert with no updatable columns
+(`data_layer.ex` raises "cannot be used with an empty list of fields to
+update"), so there is no direct equivalent of `ON CONFLICT DO NOTHING`.
+The working spelling is to list *the conflict keys themselves* in
+`upsert_fields` — they fold into a no-op `SET key = key`, which is the
+"keep the first row" behaviour you wanted:
+
+```elixir
+create :stamp do
+  upsert? true
+  upsert_identity :one_per_day
+  upsert_fields [:account_id, :server_day]
+end
+```
+
+The trap is the middle ground. `upsert_fields [:ended_at]` on an action
+that isn't changing `ended_at` is filtered out by Ash's
+`attributes_changing_anywhere` pass and then folded away by the conflict
+keys — the upsert runs, returns `{:ok, record}`, and updates **nothing**,
+with no error and no warning. Pick one of the two ends deliberately: every
+updatable field, or only the conflict keys. Anything in between can quietly
+become a no-op, and only a test catches it.
+
 ## Ash queries
 
 **`Ash.Query.filter/2` is a macro — it can't take a runtime list of field names.**
@@ -126,6 +150,44 @@ including other NULLs" — multiple NULL rows don't violate uniqueness. A
 naive `GROUP BY col HAVING count(*) > 1` groups multiple NULLs together as a
 false-positive duplicate. Add `WHERE col IS NOT NULL` before grouping if
 you're trying to mirror what a real UNIQUE constraint would flag.
+
+## Transactions
+
+**Wrap Ash calls in `Ash.transaction/2`, not `Repo.transaction/1`.**
+Ash queues its notifications (`after_action` hooks, pub-sub) until the
+surrounding transaction commits. A `Repo.transaction` Ash doesn't know
+about never releases them, and the next action raises from
+`warn_missed!`. `Ash.transaction(fn -> ... end, ...)` is the supported
+wrapper.
+
+**Inside it, three return-value surprises, in the order you'll hit them.**
+
+1. Rolling back is `Ash.DataLayer.rollback/2`, not `Ash.rollback/2` —
+   the latter does not exist.
+2. `Ash.transaction/2` treats an inner `{:error, reason}` as a failure of
+   the transaction, so a function that legitimately returns
+   `{:error, :already_claimed}` can never be received as
+   `{:ok, {:error, :already_claimed}}` by the caller.
+3. Whatever you hand to `rollback/2` comes back wrapped in an
+   `Ash.Error.Unknown.UnknownError` — the bare atom is not recoverable
+   from the outside.
+
+Together these mean a business "no" (already claimed, expired, over
+quota) should not travel out of the transaction as an error at all.
+Decide every refusal *before* the first write and carry the reason on a
+distinct success tag:
+
+```elixir
+Ash.transaction(fn ->
+  case check(code) do
+    :ok -> {:claimed, do_claim(code)}
+    {:no, reason} -> {:refused, reason}
+  end
+end, [Code])
+```
+
+Reserve `rollback/2` for genuine failures, where losing the reason's exact
+shape doesn't matter.
 
 ## Spark DSL & macros
 
