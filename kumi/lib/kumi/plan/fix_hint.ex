@@ -19,7 +19,8 @@ defmodule Kumi.Plan.FixHint do
 
   SQL text itself comes from `Kumi.Plan.SQL` (the one place SQL is
   generated, shared with `Kumi.Apply`) — this module only wraps it with
-  the surrounding advisory prose. Where `Kumi.Plan.SQL.render/1` returns
+  the surrounding advisory prose, which lives in `Kumi.Plan.Locale` so it
+  can be printed in the app's language. The SQL is never translated. Where `Kumi.Plan.SQL.render/1` returns
   `:unsupported` (`add_table`, a `change_column` with a default/precision
   change), we fall back to a plain "adjust/recreate manually" line —
   defaults are normalized Ash-side terms, not SQL (see `Kumi.Schema.Column`).
@@ -27,112 +28,117 @@ defmodule Kumi.Plan.FixHint do
 
   alias Kumi.Plan.SQL
 
-  @codegen "mix ash.codegen <name> && mix ash_postgres.migrate"
+  @doc """
+  Remediation lines for one operation, in `locale`.
 
-  @spec lines(Kumi.Diff.op()) :: [String.t()]
-  def lines({:add_table, table}) do
+  Advisory prose only — the SQL inside a line comes from
+  `Kumi.Plan.SQL` and is never translated, because it is meant to be
+  copied into psql.
+  """
+  @spec lines(Kumi.Diff.op(), Kumi.Locale.locale()) :: [String.t()]
+  def lines(op, locale \\ Kumi.Locale.base_locale())
+
+  def lines({:add_table, table}, locale) do
     [
-      "fix: #{@codegen}  (code ahead of DB)",
-      "if codegen emits nothing, table #{table.name} was dropped manually — recreate it by hand"
+      codegen_line(locale),
+      t(locale, :hint_add_table, table: table.name)
     ]
   end
 
-  def lines({:add_column, _table, _col} = op), do: code_ahead_lines(op)
-  def lines({:add_fk, _table, _fk} = op), do: code_ahead_lines(op)
-  def lines({:add_index, _table, _idx} = op), do: code_ahead_lines(op)
-  def lines({:change_column, _table, _col, _changes} = op), do: code_ahead_lines(op)
+  def lines({:add_column, _table, _col} = op, locale), do: code_ahead_lines(op, locale)
+  def lines({:add_fk, _table, _fk} = op, locale), do: code_ahead_lines(op, locale)
+  def lines({:add_index, _table, _idx} = op, locale), do: code_ahead_lines(op, locale)
 
-  def lines({:drop_table, _table} = op) do
-    [
-      "fix: to keep it, define it as an Ash resource (ash.codegen cannot see this drift)",
-      remove_sql(op)
-    ]
-  end
+  def lines({:change_column, _table, _col, _changes} = op, locale),
+    do: code_ahead_lines(op, locale)
 
-  def lines({:remove_column, _table, _col} = op) do
-    [
-      "fix: to keep it, add the attribute to your Ash resource (ash.codegen cannot see this drift)",
-      remove_sql(op)
-    ]
-  end
+  def lines({:drop_table, _table} = op, locale),
+    do: [t(locale, :hint_keep_resource), remove_sql(op, locale)]
 
-  def lines({:remove_fk, _table, _fk} = op) do
-    [
-      "fix: to keep it, add the relationship to your Ash resource (ash.codegen cannot see this drift)",
-      remove_sql(op)
-    ]
-  end
+  def lines({:remove_column, _table, _col} = op, locale),
+    do: [t(locale, :hint_keep_attribute), remove_sql(op, locale)]
 
-  def lines({:remove_index, _table, _idx} = op) do
-    [
-      "fix: to keep it, add the identity/index to your Ash resource (ash.codegen cannot see this drift)",
-      remove_sql(op)
-    ]
-  end
+  def lines({:remove_fk, _table, _fk} = op, locale),
+    do: [t(locale, :hint_keep_relationship), remove_sql(op, locale)]
 
-  def lines({:possible_rename, _table, _x, _y} = op) do
+  def lines({:remove_index, _table, _idx} = op, locale),
+    do: [t(locale, :hint_keep_identity), remove_sql(op, locale)]
+
+  def lines({:possible_rename, _table, _x, _y} = op, locale) do
     {:ok, sql} = SQL.render(op)
 
-    [
-      "fix: if this is a rename, run BEFORE ash.codegen (codegen would emit drop+add and lose data):",
-      sql
-    ]
+    [t(locale, :hint_rename_first), sql]
   end
 
-  # No literal SQL here (SQL.render/1 is :unsupported for all three — a
+  # No literal SQL here (SQL.render/1 is :unsupported for all four — a
   # DROP+CREATE / DROP+ADD CONSTRAINT pair isn't one exact statement) — see
   # `mix ash.codegen` for the code-ahead direction, and describe the
   # drop/create pair in prose so a human can apply it deliberately.
-  def lines({:change_primary_key, _table, desired_pk, actual_pk}) do
+  def lines({:change_primary_key, _table, desired_pk, actual_pk}, locale) do
     [
-      "fix: #{@codegen}  (code ahead of DB)",
-      "if codegen emits nothing, primary key drifted (DB: #{inspect(actual_pk)}, code: #{inspect(desired_pk)}) — " <>
-        "changing it needs DROP CONSTRAINT <table>_pkey + ADD CONSTRAINT ... PRIMARY KEY (...); apply manually, verify data implications first"
+      codegen_line(locale),
+      t(locale, :hint_primary_key_drift,
+        actual: inspect(actual_pk),
+        desired: inspect(desired_pk)
+      )
     ]
   end
 
-  def lines({:change_fk, _table, desired_fk, actual_fk}) do
+  def lines({:change_fk, _table, desired_fk, actual_fk}, locale) do
     [
-      "fix: #{@codegen}  (code ahead of DB)",
-      "if codegen emits nothing, FK #{desired_fk.column} target drifted (DB: #{actual_fk.references_table}.#{actual_fk.references_column}, " <>
-        "code: #{desired_fk.references_table}.#{desired_fk.references_column}) — " <>
-        "needs DROP CONSTRAINT #{actual_fk.name} + ADD CONSTRAINT pointing at the new target; apply manually"
+      codegen_line(locale),
+      t(locale, :hint_fk_drift,
+        column: desired_fk.column,
+        actual: "#{actual_fk.references_table}.#{actual_fk.references_column}",
+        desired: "#{desired_fk.references_table}.#{desired_fk.references_column}",
+        constraint: actual_fk.name
+      )
     ]
   end
 
-  def lines({:change_fk_on_delete, _table, desired_fk, actual_fk}) do
+  def lines({:change_fk_on_delete, _table, desired_fk, actual_fk}, locale) do
     [
-      "fix: #{@codegen}  (code ahead of DB)",
-      "if codegen emits nothing, FK #{desired_fk.column} on_delete drifted " <>
-        "(DB: #{inspect(actual_fk.on_delete)}, code: #{inspect(desired_fk.on_delete)}) — " <>
-        "needs DROP CONSTRAINT #{actual_fk.name} + ADD CONSTRAINT ... ON DELETE ...; apply manually"
+      codegen_line(locale),
+      t(locale, :hint_fk_on_delete_drift,
+        column: desired_fk.column,
+        actual: inspect(actual_fk.on_delete),
+        desired: inspect(desired_fk.on_delete),
+        constraint: actual_fk.name
+      )
     ]
   end
 
-  def lines({:change_index, _table, desired_idx, actual_idx}) do
+  def lines({:change_index, _table, desired_idx, actual_idx}, locale) do
     [
-      "fix: #{@codegen}  (code ahead of DB)",
-      "if codegen emits nothing, index #{desired_idx.name} definition drifted " <>
-        "(DB: columns #{inspect(actual_idx.columns)}, unique #{actual_idx.unique}; code: columns #{inspect(desired_idx.columns)}, unique #{desired_idx.unique}) — " <>
-        "needs DROP INDEX + CREATE INDEX; apply manually"
+      codegen_line(locale),
+      t(locale, :hint_index_drift,
+        index: desired_idx.name,
+        actual_columns: inspect(actual_idx.columns),
+        actual_unique: actual_idx.unique,
+        desired_columns: inspect(desired_idx.columns),
+        desired_unique: desired_idx.unique
+      )
     ]
   end
 
-  defp code_ahead_lines(op) do
+  defp code_ahead_lines(op, locale) do
     fallback =
       case SQL.render(op) do
-        {:ok, sql} ->
-          "if codegen emits nothing, the DB drifted — apply manually: " <> sql
-
-        :unsupported ->
-          "if codegen emits nothing, the DB drifted — adjust manually (default/precision changes have no single SQL form)"
+        {:ok, sql} -> t(locale, :hint_code_ahead_sql, sql: sql)
+        :unsupported -> t(locale, :hint_code_ahead_manual)
       end
 
-    ["fix: #{@codegen}  (code ahead of DB)", fallback]
+    [codegen_line(locale), fallback]
   end
 
-  defp remove_sql(op) do
+  defp remove_sql(op, locale) do
     {:ok, sql} = SQL.render(op)
-    "to remove it: " <> sql
+    t(locale, :hint_remove_sql, sql: sql)
   end
+
+  defp codegen_line(locale),
+    do: t(locale, :hint_codegen, codegen: Kumi.Plan.Locale.codegen_command())
+
+  defp t(locale, key, bindings \\ []),
+    do: Kumi.Plan.Locale.translate(locale, key, bindings)
 end

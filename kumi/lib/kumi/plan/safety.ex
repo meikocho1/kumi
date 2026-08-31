@@ -45,6 +45,15 @@ defmodule Kumi.Plan.Safety do
   @type level :: :safe | :review | :dangerous
   @type reason :: String.t()
 
+  @typedoc """
+  A reason before it becomes prose: the string key in
+  `Kumi.Plan.Locale` plus the values to interpolate. Classification is a
+  function of the operation tuple alone, so the reason is too — which is
+  what makes it renderable in any locale instead of only readable in the
+  one it was written in.
+  """
+  @type spec :: {level(), atom(), keyword()}
+
   # {actual_type, desired_type} pairs that are a safe WIDENING and nothing
   # else. Any pair not listed here is DANGEROUS by default (fail closed).
   @widening_pairs [
@@ -54,93 +63,106 @@ defmodule Kumi.Plan.Safety do
     {"float4", "float8"}
   ]
 
-  @spec classify(term()) :: {level(), reason()}
-  def classify({:add_table, table}), do: {:safe, "creates new table #{table.name}"}
+  @doc """
+  The safety level and the human reason for one operation.
 
-  def classify({:drop_table, table}),
-    do: {:dangerous, "drops table #{table.name} and all its data"}
+  `locale` only changes the prose. The level — and therefore
+  `mix kumi.plan --check`'s exit code — is identical in every locale, and
+  `--json` always renders `:en` so a machine consumer never sees the
+  language change under it.
+  """
+  @spec classify(term(), Kumi.Locale.locale()) :: {level(), reason()}
+  def classify(op, locale \\ Kumi.Locale.base_locale()) do
+    {level, key, bindings} = spec(op)
+    {level, Kumi.Plan.Locale.translate(locale, key, bindings)}
+  end
 
-  def classify({:add_column, _table, %Column{nullable: true} = col}),
-    do: {:safe, "adds nullable column #{col.name}"}
+  @doc "The structured form of `classify/2`'s reason — the key and its bindings."
+  @spec spec(term()) :: spec()
+  def spec({:add_table, table}), do: {:safe, :safety_add_table, table: table.name}
 
-  def classify({:add_column, _table, %Column{nullable: false} = col}),
-    do: {:review, "adds NOT NULL column #{col.name} — existing rows need a default/backfill"}
+  def spec({:drop_table, table}), do: {:dangerous, :safety_drop_table, table: table.name}
 
-  def classify({:remove_column, _table, col}),
+  def spec({:add_column, _table, %Column{nullable: true} = col}),
+    do: {:safe, :safety_add_column_nullable, column: col.name}
+
+  def spec({:add_column, _table, %Column{nullable: false} = col}),
+    do: {:review, :safety_add_column_not_null, column: col.name}
+
+  def spec({:remove_column, _table, col}),
+    do: {:dangerous, :safety_remove_column, column: col.name}
+
+  def spec({:add_fk, _table, fk}), do: {:review, :safety_add_fk, column: fk.column}
+
+  def spec({:remove_fk, _table, fk}), do: {:review, :safety_remove_fk, column: fk.column}
+
+  def spec({:add_index, _table, %{unique: true} = idx}),
+    do: {:review, :safety_add_index_unique, index: idx.name}
+
+  def spec({:add_index, _table, idx}), do: {:safe, :safety_add_index, index: idx.name}
+
+  def spec({:remove_index, _table, idx}),
+    do: {:review, :safety_remove_index, index: idx.name}
+
+  def spec({:change_primary_key, _table, desired_pk, actual_pk}),
     do:
-      {:dangerous,
-       "drops column #{col.name} — in the DB, not in code, not matched as a rename: data loss"}
+      {:review, :safety_change_primary_key,
+       actual: inspect(actual_pk), desired: inspect(desired_pk)}
 
-  def classify({:add_fk, _table, fk}),
-    do: {:review, "adds FK #{fk.column} on an existing table"}
-
-  def classify({:remove_fk, _table, fk}),
-    do: {:review, "removes FK #{fk.column} from an existing table"}
-
-  def classify({:add_index, _table, %{unique: true} = idx}),
-    do: {:review, "adds UNIQUE index #{idx.name}"}
-
-  def classify({:add_index, _table, idx}),
-    do: {:safe, "adds index #{idx.name} — use CREATE INDEX CONCURRENTLY in production"}
-
-  def classify({:remove_index, _table, idx}),
-    do: {:review, "removes index #{idx.name} — only ever drift, not requested by code"}
-
-  def classify({:change_primary_key, _table, desired_pk, actual_pk}),
+  def spec({:change_fk, _table, desired_fk, actual_fk}),
     do:
-      {:review,
-       "primary key changed #{inspect(actual_pk)} -> #{inspect(desired_pk)} — needs DROP CONSTRAINT + ADD CONSTRAINT, verify manually"}
-
-  def classify({:change_fk, _table, desired_fk, actual_fk}),
-    do:
-      {:review,
-       "FK #{desired_fk.column} target changed #{actual_fk.references_table}.#{actual_fk.references_column} -> " <>
-         "#{desired_fk.references_table}.#{desired_fk.references_column}"}
+      {:review, :safety_change_fk,
+       column: desired_fk.column,
+       actual: "#{actual_fk.references_table}.#{actual_fk.references_column}",
+       desired: "#{desired_fk.references_table}.#{desired_fk.references_column}"}
 
   # Never SAFE, in either direction. The constraint has to be replaced, and
   # both directions change behaviour that matters: dropping `:delete` makes
   # the parent row undeletable, adding it makes rows disappear that used to
   # block the delete.
-  def classify({:change_fk_on_delete, _table, desired_fk, actual_fk}),
+  def spec({:change_fk_on_delete, _table, desired_fk, actual_fk}),
     do:
-      {:review,
-       "FK #{desired_fk.column} on_delete changed #{inspect(actual_fk.on_delete)} -> #{inspect(desired_fk.on_delete)} — " <>
-         "needs DROP CONSTRAINT + ADD CONSTRAINT, verify deletes still behave as intended"}
+      {:review, :safety_change_fk_on_delete,
+       column: desired_fk.column,
+       actual: inspect(actual_fk.on_delete),
+       desired: inspect(desired_fk.on_delete)}
 
-  def classify({:change_index, _table, desired_idx, actual_idx}),
+  def spec({:change_index, _table, desired_idx, actual_idx}),
     do:
-      {:review,
-       "index #{desired_idx.name} definition changed — columns #{inspect(actual_idx.columns)} -> #{inspect(desired_idx.columns)}, " <>
-         "unique #{actual_idx.unique} -> #{desired_idx.unique}"}
+      {:review, :safety_change_index,
+       index: desired_idx.name,
+       actual_columns: inspect(actual_idx.columns),
+       desired_columns: inspect(desired_idx.columns),
+       actual_unique: actual_idx.unique,
+       desired_unique: desired_idx.unique}
 
-  def classify({:possible_rename, _table, x, y}),
-    do:
-      {:review,
-       "possible rename #{x.name} -> #{y.name} (heuristic guess from snapshot history, verify before applying)"}
+  def spec({:possible_rename, _table, x, y}),
+    do: {:review, :safety_possible_rename, from: x.name, to: y.name}
 
-  def classify({:change_column, _table, col, changes}) do
+  def spec({:change_column, _table, col, changes}) do
     changes
-    |> Enum.map(&classify_change(col, &1))
+    |> Enum.map(&change_spec(col, &1))
     |> worst()
   end
 
-  defp classify_change(col, {:type, desired, actual}) do
+  defp change_spec(col, {:type, desired, actual}) do
     if {actual, desired} in @widening_pairs do
-      {:review, "widens #{col.name} type #{actual} -> #{desired}"}
+      {:review, :safety_widen_type, column: col.name, actual: actual, desired: desired}
     else
-      {:dangerous,
-       "narrows or changes #{col.name} type #{actual} -> #{desired} (default: unsafe)"}
+      {:dangerous, :safety_change_type, column: col.name, actual: actual, desired: desired}
     end
   end
 
-  defp classify_change(col, {:nullable, false, true}),
-    do: {:review, "tightens #{col.name} to NOT NULL — existing NULLs would fail"}
+  defp change_spec(col, {:nullable, false, true}),
+    do: {:review, :safety_tighten_not_null, column: col.name}
 
-  defp classify_change(col, {:nullable, true, false}),
-    do: {:safe, "relaxes #{col.name} to allow NULL"}
+  defp change_spec(col, {:nullable, true, false}),
+    do: {:safe, :safety_relax_null, column: col.name}
 
-  defp classify_change(col, {:default, desired, actual}),
-    do: {:safe, "changes #{col.name} default #{inspect(actual)} -> #{inspect(desired)}"}
+  defp change_spec(col, {:default, desired, actual}),
+    do:
+      {:safe, :safety_change_default,
+       column: col.name, actual: inspect(actual), desired: inspect(desired)}
 
   # Verified empirically (v0.1.5, F33): `ALTER COLUMN ... TYPE timestamp(N)`
   # between precisions succeeds with an implicit cast in both directions —
@@ -148,15 +170,13 @@ defmodule Kumi.Plan.Safety do
   # truncation, not a failure: 12:00:00.900001 -> 12:00:01, not .900000 or
   # an error). So neither direction is DANGEROUS; both are REVIEW because
   # narrowing is a real (if non-failing) loss of stored precision.
-  defp classify_change(col, {:datetime_precision, desired, actual})
+  defp change_spec(col, {:datetime_precision, desired, actual})
        when is_integer(desired) and is_integer(actual) and desired > actual,
-       do: {:review, "widens #{col.name} timestamp precision #{actual} -> #{desired}"}
+       do: {:review, :safety_widen_precision, column: col.name, actual: actual, desired: desired}
 
-  defp classify_change(col, {:datetime_precision, desired, actual})
+  defp change_spec(col, {:datetime_precision, desired, actual})
        when is_integer(desired) and is_integer(actual),
-       do:
-         {:review,
-          "narrows #{col.name} timestamp precision #{actual} -> #{desired} (rounds sub-second values, does not fail)"}
+       do: {:review, :safety_narrow_precision, column: col.name, actual: actual, desired: desired}
 
   # One side nil means the column stopped/started being a precision-bearing
   # type entirely. This USUALLY arrives alongside a `:type` change, which
@@ -167,12 +187,12 @@ defmodule Kumi.Plan.Safety do
   # accompanying `:type` change, and this clause used to return `:safe`
   # here, silently). Fail closed to REVIEW instead of asserting a sibling
   # change that may not exist.
-  defp classify_change(col, {:datetime_precision, desired, actual}),
+  defp change_spec(col, {:datetime_precision, desired, actual}),
     do:
-      {:review,
-       "#{col.name} timestamp-ness changed (precision #{inspect(actual)} -> #{inspect(desired)}) — verify manually"}
+      {:review, :safety_change_timestampness,
+       column: col.name, actual: inspect(actual), desired: inspect(desired)}
 
-  defp worst(changes), do: Enum.max_by(changes, fn {level, _reason} -> severity(level) end)
+  defp worst(specs), do: Enum.max_by(specs, fn {level, _key, _bindings} -> severity(level) end)
 
   defp severity(:safe), do: 0
   defp severity(:review), do: 1

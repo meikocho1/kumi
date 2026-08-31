@@ -11,6 +11,70 @@ defmodule Mix.Tasks.Kumi.Resolve do
   mix tasks that need it can't drift apart.
   """
 
+  @doc """
+  The locale to print in: an explicit `--locale` wins, then the app's own
+  `app do locale ... end`, then `:en`.
+
+  With no `--app`, the app is *found* rather than named — `locale :ja` is
+  declared once and the guide calls that the whole switch, so requiring
+  `--app` on every invocation just to be answered in Japanese would make
+  it two switches. See `app_locale/1` for what "found" means.
+
+  Only the prose is affected — `Kumi.Plan.summary_line/1`, exit codes and
+  `--json` are identical in every locale. An unknown `--locale` fails the
+  task rather than quietly printing English: the person who typed it is
+  the person who needs to know.
+  """
+  @spec locale(String.t() | nil, String.t() | nil) :: Kumi.Locale.locale()
+  def locale(nil, nil), do: app_locale(host_modules())
+
+  def locale(nil, app_name),
+    do: app_name |> List.wrap() |> Module.concat() |> Kumi.App.Info.locale()
+
+  def locale(requested, _app_name) do
+    locale = String.to_atom(requested)
+
+    unless Kumi.Locale.supported?(locale) do
+      Mix.raise(
+        "mix kumi: unknown --locale #{inspect(requested)} — available: " <>
+          inspect(Kumi.Locale.locales())
+      )
+    end
+
+    locale
+  end
+
+  @doc """
+  The declared locale of the single `Kumi.App` among `modules`, else `:en`.
+
+  Exactly one app is the normal shape, and it is the only shape that
+  answers the question: with none there is nothing to read, and with
+  several there is no way to know which one speaks for this repository.
+  Both of those stay in the base locale, because printing the wrong
+  language confidently is worse than printing English — and `--locale`
+  is there for anyone who needs to say so explicitly.
+  """
+  @spec app_locale([module()]) :: Kumi.Locale.locale()
+  def app_locale(modules) do
+    case Enum.filter(modules, &kumi_app?/1) do
+      [app] -> Kumi.App.Info.locale(app)
+      _none_or_several -> Kumi.Locale.base_locale()
+    end
+  end
+
+  defp host_modules do
+    otp_app = Mix.Project.config()[:app]
+    Application.spec(otp_app, :modules) || []
+  end
+
+  # `spark_is/0` is what `use Spark.Dsl` leaves behind, so this
+  # distinguishes a `Kumi.App` from an `Ash.Resource` (which also answers
+  # it) without loading a module list and guessing from names.
+  defp kumi_app?(module) do
+    Code.ensure_loaded?(module) and function_exported?(module, :spark_is, 0) and
+      module.spark_is() == Kumi.App
+  end
+
   @spec build_plan(String.t() | nil, boolean()) :: Kumi.Plan.t()
   def build_plan(app_name, probe?)
 

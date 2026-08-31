@@ -68,4 +68,45 @@ defmodule Kumi.Report.FormatTest do
     assert text =~ "change_fk t.a"
     assert text =~ "change_index t.idx"
   end
+
+  describe "locale" do
+    test "a step's detail follows the locale, and a captured one does not" do
+      steps = [
+        %Step{
+          name: :format,
+          status: :pass,
+          detail: "all files formatted",
+          detail_key: {:step_format_pass, []}
+        },
+        # `mix test`'s own summary line. Kumi didn't write it, so there is
+        # no key and it must survive untouched.
+        %Step{name: :test, status: :pass, detail: "Result: 12 passed"}
+      ]
+
+      report = %Kumi.Report{steps: steps, plan: nil, verdict: :ready}
+
+      ja = Format.format(report, locale: :ja)
+
+      assert ja =~ "すべて整形済み"
+      assert ja =~ "Result: 12 passed"
+      assert ja =~ "判定: ready"
+      refute ja =~ "all files formatted"
+    end
+
+    test "the base locale prints the stored English verbatim" do
+      # `--json` reads the same `detail` field, so the two must agree
+      # character for character.
+      step = %Step{
+        name: :plan,
+        status: :fail,
+        detail: "blocked: 1 safe / 2 review / 0 dangerous",
+        detail_key: {:step_plan_blocked, [summary: "1 safe / 2 review / 0 dangerous"]}
+      }
+
+      report = %Kumi.Report{steps: [step], plan: nil, verdict: :blocked}
+
+      assert Format.format(report) =~ "blocked: 1 safe / 2 review / 0 dangerous"
+      assert Format.format(report, locale: :ja) =~ "止まっています: 1 safe / 2 review / 0 dangerous"
+    end
+  end
 end

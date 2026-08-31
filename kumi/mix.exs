@@ -75,6 +75,7 @@ defmodule Kumi.MixProject do
         "guides/auth.md",
         "guides/api.md",
         "guides/frontend.md",
+        "guides/i18n.md",
         "guides/ash-gotchas.md"
       ]
     ]

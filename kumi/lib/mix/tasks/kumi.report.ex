@@ -67,7 +67,13 @@ defmodule Mix.Tasks.Kumi.Report do
   def run(args) do
     {opts, _rest} =
       OptionParser.parse!(args,
-        strict: [json: :boolean, skip_tests: :boolean, strict: :boolean, app: :string]
+        strict: [
+          json: :boolean,
+          skip_tests: :boolean,
+          strict: :boolean,
+          app: :string,
+          locale: :string
+        ]
       )
 
     env = [{"MIX_ENV", to_string(Mix.env())}]
@@ -87,24 +93,46 @@ defmodule Mix.Tasks.Kumi.Report do
 
     report = Report.build([format_step, compile_step, test_step, codegen_step, plan_step], plan)
 
-    Mix.shell().info(if opts[:json], do: Json.encode(report), else: Format.format(report))
+    # `--json` is deliberately not localized — a machine consumer's fields
+    # must not change language when someone sets `locale :ja`.
+    locale = Mix.Tasks.Kumi.Resolve.locale(opts[:locale], opts[:app])
+
+    Mix.shell().info(
+      if opts[:json], do: Json.encode(report), else: Format.format(report, locale: locale)
+    )
 
     code = Report.exit_code(report, strict: opts[:strict] || false)
     if code != 0, do: exit({:shutdown, code})
   end
 
-  defp skipped(name), do: %Step{name: name, status: :skipped, detail: "skipped (compile failed)"}
+  defp skipped(name), do: step(name, :skipped, :step_skipped)
 
   defp shell_step(name, args, env) do
     {output, exit_code} = System.cmd("mix", args, stderr_to_stdout: true, env: env)
     status = if exit_code == 0, do: :pass, else: :fail
-    %Step{name: name, status: status, detail: detail_for(name, status, output)}
+    detail_for(name, status, output)
   end
 
-  defp detail_for(:format, :pass, _output), do: "all files formatted"
-  defp detail_for(:compile, :pass, _output), do: "compiled cleanly (no warnings)"
-  defp detail_for(:codegen, :pass, _output), do: "up to date (no pending migrations)"
-  defp detail_for(_name, :fail, output), do: truncate(output)
+  defp detail_for(:format, :pass, _output), do: step(:format, :pass, :step_format_pass)
+  defp detail_for(:compile, :pass, _output), do: step(:compile, :pass, :step_compile_pass)
+  defp detail_for(:codegen, :pass, _output), do: step(:codegen, :pass, :step_codegen_pass)
+
+  # A captured compiler or formatter diagnostic — the tool's own output,
+  # with nothing in it Kumi could translate.
+  defp detail_for(name, :fail, output), do: captured_step(name, :fail, truncate(output))
+
+  # One step, its English sentence, and the key that produced it. `--json`
+  # reads `detail`; the human formatter re-renders from `detail_key`.
+  # Neither can drift from the other because both come from this call.
+  defp step(name, status, key, bindings \\ []) do
+    english = Kumi.Plan.Locale.translate(Kumi.Locale.base_locale(), key, bindings)
+
+    %Step{name: name, status: status, detail: english, detail_key: {key, bindings}}
+  end
+
+  # A step whose detail is text Kumi captured rather than wrote.
+  defp captured_step(name, status, detail),
+    do: %Step{name: name, status: status, detail: detail, detail_key: nil}
 
   @ansi_escape ~r/\e\[[0-9;]*m/
 
@@ -140,7 +168,7 @@ defmodule Mix.Tasks.Kumi.Report do
     # against spike0_crm — see the v0.4 friction log.
     {output, exit_code} = System.cmd("mix", ["test"], stderr_to_stdout: true)
     status = if exit_code == 0, do: :pass, else: :fail
-    %Step{name: :test, status: status, detail: test_summary(output)}
+    captured_step(:test, status, test_summary(output))
   end
 
   # Elixir 1.20's ExUnit.CLIFormatter prints "Result: N passed" (or
@@ -177,17 +205,21 @@ defmodule Mix.Tasks.Kumi.Report do
 
     status = if plan.review > 0 or plan.dangerous > 0, do: :fail, else: :pass
 
-    detail =
+    detailed =
       cond do
-        Enum.empty?(plan.entries) -> "clean — database matches application definition"
-        status == :pass -> "#{plan.safe} SAFE operation(s) — acceptable with migration"
-        true -> "blocked: #{Kumi.Plan.summary_line(plan)}"
+        Enum.empty?(plan.entries) ->
+          step(:plan, status, :step_plan_clean)
+
+        status == :pass ->
+          step(:plan, status, :step_plan_safe, count: plan.safe)
+
+        true ->
+          step(:plan, status, :step_plan_blocked, summary: Kumi.Plan.summary_line(plan))
       end
 
-    {%Step{name: :plan, status: status, detail: detail}, plan}
+    {detailed, plan}
   rescue
     e ->
-      {%Step{name: :plan, status: :fail, detail: "could not build plan: #{Exception.message(e)}"},
-       nil}
+      {step(:plan, :fail, :step_plan_error, message: Exception.message(e)), nil}
   end
 end

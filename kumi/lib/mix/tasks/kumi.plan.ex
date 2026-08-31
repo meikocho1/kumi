@@ -17,6 +17,8 @@ defmodule Mix.Tasks.Kumi.Plan do
                                  `Kumi.Plan.FixHint`); never executes anything
       mix kumi.plan --app MyApp.App  # app-scoped plan (see `Kumi.plan_app/2`)
                                  instead of the default whole-database plan
+      mix kumi.plan --locale ja # print the prose in Japanese; with --app,
+                                 the app's own `locale` is the default
 
   Without `--app`, this is the convenience layer over `Kumi.plan/3`: it
   reads the host app's `:ash_domains` config (the Spark/Ash convention —
@@ -44,11 +46,13 @@ defmodule Mix.Tasks.Kumi.Plan do
           verbose: :boolean,
           probe: :boolean,
           fix_hints: :boolean,
-          app: :string
+          app: :string,
+          locale: :string
         ]
       )
 
     plan = Mix.Tasks.Kumi.Resolve.build_plan(opts[:app], opts[:probe] || false)
+    locale = Mix.Tasks.Kumi.Resolve.locale(opts[:locale], opts[:app])
 
     ops = Enum.map(plan.entries, fn {op, _level, _reason} -> op end)
 
@@ -58,7 +62,8 @@ defmodule Mix.Tasks.Kumi.Plan do
       Kumi.Plan.Format.format(ops,
         verbose: opts[:verbose] || false,
         fix_hints: opts[:fix_hints] || false,
-        findings: plan.findings
+        findings: plan.findings,
+        locale: locale
       )
     )
 

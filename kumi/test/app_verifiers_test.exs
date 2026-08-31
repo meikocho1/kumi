@@ -441,4 +441,168 @@ defmodule Kumi.AppVerifiersTest do
       end
     end
   end
+
+  describe "locale" do
+    test "an unknown locale is rejected rather than silently falling back to English" do
+      assert_dsl_error(%Spark.Error.DslError{path: [:app, :locale]}) do
+        defmodule Elixir.Kumi.AppVerifiersTest.BadLocale do
+          use Kumi.App
+
+          app do
+            name :ok
+            locale(:jp)
+          end
+
+          resources do
+            resource Kumi.Test.Account
+          end
+        end
+      end
+    end
+
+    test "a supported locale compiles" do
+      refute_dsl_errors do
+        defmodule Elixir.Kumi.AppVerifiersTest.JaLocale do
+          use Kumi.App
+
+          app do
+            name :ok
+            locale(:ja)
+          end
+
+          resources do
+            resource Kumi.Test.Account
+          end
+        end
+      end
+    end
+  end
+
+  describe "labels" do
+    test "labels for declared resources, workflows, dashboards and their parts compile" do
+      refute_dsl_errors do
+        defmodule Elixir.Kumi.AppVerifiersTest.GoodLabels do
+          use Kumi.App
+
+          app do
+            name :ok
+            locale(:ja)
+          end
+
+          resources do
+            resource Kumi.Test.Account
+          end
+
+          admin do
+            navigation([Kumi.Test.Account])
+
+            labels(%{
+              Kumi.Test.Account => "取引先",
+              {Kumi.Test.Account, :industry} => "業種",
+              :onboarding => "オンボーディング",
+              {:onboarding, :invited} => "招待済み",
+              :overview => "概要",
+              {:overview, :account_count} => "取引先数"
+            })
+          end
+
+          workflow(:onboarding,
+            resource: Kumi.Test.Account,
+            field: :industry,
+            stages: [:invited, :active]
+          )
+
+          dashboard :overview do
+            metric(:account_count, resource: Kumi.Test.Account)
+          end
+        end
+      end
+    end
+
+    test "a label for a resource the app never declared is rejected" do
+      assert_dsl_error(%Spark.Error.DslError{path: [:admin, :labels]}) do
+        defmodule Elixir.Kumi.AppVerifiersTest.LabelUnknownResource do
+          use Kumi.App
+
+          app do
+            name :ok
+          end
+
+          resources do
+            resource Kumi.Test.Account
+          end
+
+          admin do
+            labels(%{Kumi.Test.Deal => "商談"})
+          end
+        end
+      end
+    end
+
+    test "a label for an attribute the resource does not have is rejected" do
+      assert_dsl_error(%Spark.Error.DslError{path: [:admin, :labels]}) do
+        defmodule Elixir.Kumi.AppVerifiersTest.LabelUnknownField do
+          use Kumi.App
+
+          app do
+            name :ok
+          end
+
+          resources do
+            resource Kumi.Test.Account
+          end
+
+          admin do
+            labels(%{{Kumi.Test.Account, :industy} => "業種"})
+          end
+        end
+      end
+    end
+
+    test "a label for a stage the workflow does not declare is rejected" do
+      assert_dsl_error(%Spark.Error.DslError{path: [:admin, :labels]}) do
+        defmodule Elixir.Kumi.AppVerifiersTest.LabelUnknownStage do
+          use Kumi.App
+
+          app do
+            name :ok
+          end
+
+          resources do
+            resource Kumi.Test.Account
+          end
+
+          admin do
+            labels(%{{:onboarding, :archived} => "アーカイブ"})
+          end
+
+          workflow(:onboarding,
+            resource: Kumi.Test.Account,
+            field: :industry,
+            stages: [:invited]
+          )
+        end
+      end
+    end
+
+    test "a non-string label is rejected" do
+      assert_dsl_error(%Spark.Error.DslError{path: [:admin, :labels]}) do
+        defmodule Elixir.Kumi.AppVerifiersTest.LabelNotAString do
+          use Kumi.App
+
+          app do
+            name :ok
+          end
+
+          resources do
+            resource Kumi.Test.Account
+          end
+
+          admin do
+            labels(%{Kumi.Test.Account => :account})
+          end
+        end
+      end
+    end
+  end
 end

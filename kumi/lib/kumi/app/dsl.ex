@@ -58,7 +58,14 @@ defmodule Kumi.App.Dsl do
     ],
     schema: [
       name: [type: :atom, required: true, doc: "Machine-readable app identifier."],
-      title: [type: :string, doc: "Human-readable app title, e.g. for admin UI chrome."]
+      title: [type: :string, doc: "Human-readable app title, e.g. for admin UI chrome."],
+      locale: [
+        type: :atom,
+        default: :en,
+        doc:
+          "Language for admin chrome and CLI output. One of `Kumi.Locale.locales/0`. " <>
+            "Does not affect `--json` output, which is always English."
+      ]
     ]
   }
 
@@ -100,6 +107,33 @@ defmodule Kumi.App.Dsl do
         type: :pos_integer,
         default: 10,
         doc: "Max child rows shown per has_many section on a detail page."
+      ],
+      labels: [
+        # `:any`, not `:map`: Spark's `:map` requires atom keys, and half of
+        # these keys are `{scope, key}` tuples. Shape and content are checked
+        # by `Kumi.App.Verifiers.ValidateLabels`, which can say which key is
+        # wrong and what the alternatives were.
+        type: :any,
+        default: %{},
+        doc: """
+        Display text for the things this app declares, in whatever language
+        you want — free-form strings, not translation keys.
+
+        A module or atom key labels a whole term (a resource, a workflow, a
+        dashboard). A `{scope, key}` tuple labels something inside one: an
+        attribute or relationship of a resource, a stage of a workflow, a
+        metric of a dashboard.
+
+            labels %{
+              MyApp.Account => "アカウント",
+              {MyApp.Account, :inserted_at} => "登録日",
+              :sales_pipeline => "商談パイプライン",
+              {:sales_pipeline, :lead} => "見込み",
+              {:overview, :deal_count} => "商談数"
+            }
+
+        Anything not listed here falls back to the derived English label.
+        """
       ]
     ]
   }
@@ -178,7 +212,9 @@ defmodule Kumi.App.Dsl do
     Kumi.App.Verifiers.ValidateNavigation,
     Kumi.App.Verifiers.ValidateWorkflowStages,
     Kumi.App.Verifiers.ValidateDashboardMetrics,
-    Kumi.App.Verifiers.ValidateUniqueNames
+    Kumi.App.Verifiers.ValidateUniqueNames,
+    Kumi.App.Verifiers.ValidateLocale,
+    Kumi.App.Verifiers.ValidateLabels
   ]
 
   use Spark.Dsl.Extension, sections: @sections, verifiers: @verifiers

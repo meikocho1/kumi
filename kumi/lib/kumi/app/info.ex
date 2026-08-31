@@ -15,6 +15,10 @@ defmodule Kumi.App.Info do
   @spec title(module()) :: String.t() | nil
   def title(app), do: Extension.get_opt(app, [:app], :title)
 
+  @doc "The app's language for admin chrome and CLI output, defaulting to `:en`."
+  @spec locale(module()) :: Kumi.Locale.locale()
+  def locale(app), do: Extension.get_opt(app, [:app], :locale, Kumi.Locale.base_locale())
+
   @doc "The Ash resource modules declared in `resources do ... end`."
   @spec resources(module()) :: [module()]
   def resources(app) do
@@ -28,6 +32,29 @@ defmodule Kumi.App.Info do
   @doc "Max child rows shown per has_many section on a detail page (`admin do related_limit ... end`)."
   @spec related_limit(module()) :: pos_integer()
   def related_limit(app), do: Extension.get_opt(app, [:admin], :related_limit, 10)
+
+  @doc "The whole `admin do labels %{...} end` map, exactly as declared."
+  @spec labels(module()) :: map()
+  def labels(app), do: Extension.get_opt(app, [:admin], :labels, %{})
+
+  @doc """
+  The declared label for one term (a resource module, a workflow name, a
+  dashboard name), or `nil` when the app didn't declare one.
+
+  `nil` means "derive it" — the caller owns the fallback, since what a
+  sensible derived label looks like is a display decision (see
+  `KumiAdmin.Label`).
+  """
+  @spec label(module(), module() | atom()) :: String.t() | nil
+  def label(app, target), do: Map.get(labels(app), target)
+
+  @doc """
+  The declared label for something inside a term — an attribute or
+  relationship of a resource, a stage of a workflow, a metric of a
+  dashboard — or `nil`.
+  """
+  @spec label(module(), module() | atom(), atom()) :: String.t() | nil
+  def label(app, scope, key), do: Map.get(labels(app), {scope, key})
 
   @doc "The `workflow :name do ... end` entries."
   @spec workflows(module()) :: [Dsl.Workflow.t()]

@@ -12,6 +12,7 @@ defmodule Kumi.App do
         app do
           name :crm
           title "Mini CRM"
+          locale :en
         end
 
         resources do
@@ -22,6 +23,11 @@ defmodule Kumi.App do
 
         admin do
           navigation [MyApp.Account, MyApp.Contact, MyApp.Deal]
+
+          labels %{
+            MyApp.Account => "取引先",
+            {MyApp.Account, :inserted_at} => "登録日"
+          }
         end
 
         workflow :sales_pipeline,
