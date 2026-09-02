@@ -92,6 +92,14 @@ tag they collapse into that version's section.
 - `mix kumi.report`, a validation harness that runs format, compile,
   test, `ash.codegen --check` and the plan, then emits a single verdict
   (human-readable or `--json`).
+- `mix kumi.describe`, the read-only counterpart to that harness: it
+  prints the app-level model — resources and their tables, navigation,
+  workflows, dashboards, detected plugins, plan state — as JSON with a
+  `schema_version`, so an agent or a CI check can read what an
+  application *is* before touching its source, and a human can diff two
+  of them instead of reading the diff of the code. `--no-plan` needs no
+  database. It stays an index, not a second source of truth:
+  `mix kumi.expand` remains the authority on what a resource compiles to.
 - `mix kumi.install`, an Igniter installer that generates the app module
   and a `Core` domain and registers it.
 - A guide to the Ash/Spark/AshPostgres/Igniter behaviours that cost real

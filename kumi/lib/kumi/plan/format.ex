@@ -174,4 +174,33 @@ defmodule Kumi.Plan.Format do
 
   defp unique(%{unique: true}), do: " unique"
   defp unique(_idx), do: ""
+
+  @doc """
+  One-line `kind table.column` description of a diff/rename op — the
+  locale-free spelling every machine-readable and summary surface shares
+  (`Kumi.Plan.Json`, `Kumi.Report.Format`).
+  """
+  @spec describe(Kumi.Diff.op() | Kumi.Plan.Rename.rename_op()) :: String.t()
+  def describe({:add_table, table}), do: "add_table #{table.name}"
+  def describe({:drop_table, table}), do: "drop_table #{table.name}"
+  def describe({:add_column, table, col}), do: "add_column #{table}.#{col.name}"
+  def describe({:remove_column, table, col}), do: "remove_column #{table}.#{col.name}"
+  def describe({:change_column, table, col, _changes}), do: "change_column #{table}.#{col.name}"
+  def describe({:add_fk, table, fk}), do: "add_fk #{table}.#{fk.column}"
+  def describe({:remove_fk, table, fk}), do: "remove_fk #{table}.#{fk.column}"
+  def describe({:add_index, table, idx}), do: "add_index #{table}.#{idx.name}"
+  def describe({:remove_index, table, idx}), do: "remove_index #{table}.#{idx.name}"
+
+  def describe({:possible_rename, table, x, y}),
+    do: "possible_rename #{table}.#{x.name}->#{y.name}"
+
+  def describe({:change_primary_key, table, desired_pk, actual_pk}),
+    do: "change_primary_key #{table} #{inspect(actual_pk)}->#{inspect(desired_pk)}"
+
+  def describe({:change_fk, table, fk, _actual_fk}), do: "change_fk #{table}.#{fk.column}"
+
+  def describe({:change_fk_on_delete, table, fk, _actual_fk}),
+    do: "change_fk_on_delete #{table}.#{fk.column}"
+
+  def describe({:change_index, table, idx, _actual_idx}), do: "change_index #{table}.#{idx.name}"
 end

@@ -60,7 +60,7 @@ defmodule Kumi.Report.Format do
       # `--json` serializes); re-render it from the op for any other locale.
       reason = if locale == Kumi.Locale.base_locale(), do: reason, else: localized(op, locale)
 
-      "    - #{describe(op)}  [#{String.upcase(to_string(level))}: #{reason}]\n"
+      "    - #{Kumi.Plan.Format.describe(op)}  [#{String.upcase(to_string(level))}: #{reason}]\n"
     end)
   end
 
@@ -72,29 +72,4 @@ defmodule Kumi.Report.Format do
   defp verdict_line(verdict, locale) do
     "\n" <> Kumi.Plan.Locale.translate(locale, :"verdict_#{verdict}")
   end
-
-  @doc "One-line `kind table.column` description of a diff/rename op — shared with `Kumi.Report.Json`."
-  @spec describe(Kumi.Diff.op() | Kumi.Plan.Rename.rename_op()) :: String.t()
-  def describe({:add_table, table}), do: "add_table #{table.name}"
-  def describe({:drop_table, table}), do: "drop_table #{table.name}"
-  def describe({:add_column, table, col}), do: "add_column #{table}.#{col.name}"
-  def describe({:remove_column, table, col}), do: "remove_column #{table}.#{col.name}"
-  def describe({:change_column, table, col, _changes}), do: "change_column #{table}.#{col.name}"
-  def describe({:add_fk, table, fk}), do: "add_fk #{table}.#{fk.column}"
-  def describe({:remove_fk, table, fk}), do: "remove_fk #{table}.#{fk.column}"
-  def describe({:add_index, table, idx}), do: "add_index #{table}.#{idx.name}"
-  def describe({:remove_index, table, idx}), do: "remove_index #{table}.#{idx.name}"
-
-  def describe({:possible_rename, table, x, y}),
-    do: "possible_rename #{table}.#{x.name}->#{y.name}"
-
-  def describe({:change_primary_key, table, desired_pk, actual_pk}),
-    do: "change_primary_key #{table} #{inspect(actual_pk)}->#{inspect(desired_pk)}"
-
-  def describe({:change_fk, table, fk, _actual_fk}), do: "change_fk #{table}.#{fk.column}"
-
-  def describe({:change_fk_on_delete, table, fk, _actual_fk}),
-    do: "change_fk_on_delete #{table}.#{fk.column}"
-
-  def describe({:change_index, table, idx, _actual_idx}), do: "change_index #{table}.#{idx.name}"
 end

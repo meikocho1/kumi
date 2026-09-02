@@ -186,22 +186,11 @@ defmodule Mix.Tasks.Kumi.Report do
 
   defp plan_step(app_name) do
     Mix.Task.run("app.start")
-    # Kumi.Actual's introspection issues several raw Ecto queries; under a
-    # host app's dev logger config (commonly :debug) those print
-    # "[debug] QUERY ..." lines straight to stdout, ahead of this task's
-    # own output — which corrupts `--json`'s "single JSON object on
-    # stdout" contract. Silenced for the duration of this step only, then
-    # restored (found running this against spike0_crm — see the v0.4
-    # friction log).
-    previous_level = Logger.level()
-    Logger.configure(level: :warning)
 
     plan =
-      try do
+      Mix.Tasks.Kumi.Resolve.quietly(fn ->
         Mix.Tasks.Kumi.Resolve.build_plan(app_name, false)
-      after
-        Logger.configure(level: previous_level)
-      end
+      end)
 
     status = if plan.review > 0 or plan.dangerous > 0, do: :fail, else: :pass
 

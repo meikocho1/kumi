@@ -1,0 +1,49 @@
+{
+  "admin": {
+    "navigation": [
+      "Kumi.Test.Account"
+    ],
+    "related_limit": 10
+  },
+  "app": {
+    "locale": "en",
+    "module": "Kumi.Test.App",
+    "name": "test_app",
+    "title": "Test App"
+  },
+  "dashboards": [
+    {
+      "metrics": [
+        {
+          "field": null,
+          "kind": "count",
+          "name": "account_count",
+          "resource": "Kumi.Test.Account"
+        }
+      ],
+      "name": "overview"
+    }
+  ],
+  "plan": null,
+  "plugins": [],
+  "resources": [
+    {
+      "domain": "Kumi.Test.Domain",
+      "in_navigation": true,
+      "module": "Kumi.Test.Account",
+      "table": "kumi_test_accounts"
+    }
+  ],
+  "schema_version": 1,
+  "workflows": [
+    {
+      "field": "industry",
+      "name": "onboarding",
+      "resource": "Kumi.Test.Account",
+      "stages": [
+        "invited",
+        "active"
+      ]
+    }
+  ]
+}

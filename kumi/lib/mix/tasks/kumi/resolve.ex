@@ -62,6 +62,31 @@ defmodule Mix.Tasks.Kumi.Resolve do
     end
   end
 
+  @doc """
+  The single `Kumi.App` in the host project, for a task that needs one and
+  wasn't given `--app`.
+
+  Unlike `app_locale/1`, none and several are errors rather than a quiet
+  fallback: a locale has a safe default to fall back *to*, an app to
+  describe does not.
+  """
+  @spec find_app() :: module()
+  def find_app do
+    case Enum.filter(host_modules(), &kumi_app?/1) do
+      [app] ->
+        app
+
+      [] ->
+        Mix.raise("mix kumi: no Kumi.App found in this project — pass --app MyApp.App")
+
+      many ->
+        Mix.raise(
+          "mix kumi: found #{length(many)} Kumi.App modules (#{inspect(many)}) — " <>
+            "pass --app to say which one"
+        )
+    end
+  end
+
   defp host_modules do
     otp_app = Mix.Project.config()[:app]
     Application.spec(otp_app, :modules) || []
@@ -73,6 +98,29 @@ defmodule Mix.Tasks.Kumi.Resolve do
   defp kumi_app?(module) do
     Code.ensure_loaded?(module) and function_exported?(module, :spark_is, 0) and
       module.spark_is() == Kumi.App
+  end
+
+  @doc """
+  Runs `fun` with the host's Logger silenced below `:warning`, restoring
+  the previous level afterwards.
+
+  `Kumi.Actual`'s introspection issues several raw Ecto queries; under a
+  host app's dev logger config (commonly `:debug`) those print
+  `[debug] QUERY ...` lines straight to stdout, ahead of the caller's own
+  output — which corrupts the "one JSON object on stdout" contract that
+  `mix kumi.report --json` and `mix kumi.describe` both make. Found
+  running against spike0_crm; see the friction log.
+  """
+  @spec quietly((-> result)) :: result when result: term()
+  def quietly(fun) do
+    previous_level = Logger.level()
+    Logger.configure(level: :warning)
+
+    try do
+      fun.()
+    after
+      Logger.configure(level: previous_level)
+    end
   end
 
   @spec build_plan(String.t() | nil, boolean()) :: Kumi.Plan.t()

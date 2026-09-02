@@ -43,6 +43,7 @@ mix kumi.plan [--check] [--verbose] [--probe] [--app MyApp.App]
 mix kumi.apply [--yes] [--app MyApp.App]   # SAFE drift repair only (allowlist+SQL-renderable), dev-only
 mix kumi.expand My.Resource       # print the Ash source a shorthand resource compiles to
 mix kumi.report [--json] [--skip-tests] [--strict]   # format/compile/test/codegen/plan → verdict
+mix kumi.describe [--no-plan] [--app MyApp.App]   # app-level model as JSON (schema_version'd); --no-plan needs no DB
 mix kumi.install                  # igniter installer (generates lib/<app>/app.ex + <App>.Core domain, registers it in ash_domains)
 mix kumi_admin.install            # composes kumi.install + mounts the admin router
 mix kumi_storage.install          # composes kumi.install + generates <App>.Core.Attachment, configures Local backend, mounts KumiStorage.Plug

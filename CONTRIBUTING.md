@@ -124,6 +124,7 @@ inside these packages), there's one extra harness worth knowing:
 ```bash
 mix kumi.report            # format / compile / test / ash.codegen --check / kumi.plan
 mix kumi.report --json     # the same, machine-readable
+mix kumi.describe          # the app-level model this validates, as JSON
 ```
 
 It runs the same checks CI runs, plus two host-app-specific ones, and
