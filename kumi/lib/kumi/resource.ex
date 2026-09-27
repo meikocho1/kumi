@@ -59,15 +59,34 @@ defmodule Kumi.Resource do
   actions, or anything else beyond the default four actions? Write the
   Ash resource directly — start from `mix kumi.expand MyApp.Customer`'s
   output and edit it. The shorthand and hand-written Ash never conflict;
-  they're the same target. (Adding a plain Ash section like `attributes
-  do ... end` *alongside* `fields do ... end` in the same module instead
-  of doing this is rejected at compile time — see `fields/1`.)
+  they're the same target.
+
+  Mixing the two in one module instead is rejected at compile time,
+  because `mix kumi.expand` would not print the hand-written part.
+  `use Kumi.Resource` takes exactly `domain:`, `repo:` and `table:`
+  (anything else raises `ArgumentError`), and a `CompileError` is raised
+  when the module also contains:
+
+    * `attributes`, `relationships`, `actions`, `identities` or `postgres
+      do references do ... end end` entries beyond the ones `fields do ...
+      end` generated;
+    * any `calculations`, `aggregates`, `code_interface`, `validations`,
+      `changes` or `preparations` entry, or any `postgres` `custom_indexes`,
+      `check_constraints` or `custom_statements` entry;
+    * a `postgres` `table` or `repo` other than the `use` options.
+
+  Other section options (`resource do base_filter ... end`,
+  `multitenancy`, the rest of `postgres`) are not checked yet. They would
+  compile without `mix kumi.expand` printing them, so set them in plain
+  Ash only.
 
   ## Implementation note
 
   `use Ash.Resource` is emitted immediately (here, in `__using__`) — same
   position as in a hand-written resource — so this module's Spark/Ash DSL
-  identity is established at the normal point in compilation. `fields do
+  identity is established at the normal point in compilation. Its options
+  come from `Kumi.Resource.Codegen.use_opts/1`, the same list
+  `generate/3` prints on the generated `use` line. `fields do
   ... end`, once it has the field specs, generates the full resource
   source (`Kumi.Resource.Codegen.generate/3`), reparses it, and splices
   everything *except* the `use Ash.Resource` line (already applied) back
@@ -78,6 +97,7 @@ defmodule Kumi.Resource do
   """
 
   defmacro __using__(opts) do
+    Kumi.Resource.Codegen.validate_opts!(opts)
     caller = __CALLER__
     resolved_opts = Enum.map(opts, fn {k, v} -> {k, resolve_alias(v, caller)} end)
     # Stored via Module.put_attribute (not `@kumi_resource_opts unquote(...)`
@@ -87,15 +107,13 @@ defmodule Kumi.Resource do
     # macro's expansion-time `Module.get_attribute/2` call until the whole
     # module finishes (only `@before_compile` is guaranteed to see them).
     Module.put_attribute(caller.module, :kumi_resource_opts, resolved_opts)
-    domain = Keyword.fetch!(resolved_opts, :domain)
 
     quote do
       import Kumi.Resource, only: [fields: 1]
       @kumi_resource_fields_declared? false
 
-      use Ash.Resource,
-        domain: unquote(domain),
-        data_layer: AshPostgres.DataLayer
+      # The same options `Codegen.generate/3` prints on its `use` line.
+      use Ash.Resource, unquote(Kumi.Resource.Codegen.use_opts(resolved_opts))
 
       # Registered AFTER `use Ash.Resource` on purpose: Elixir runs
       # `@before_compile` hooks in registration order, and `use Ash.Resource`
@@ -118,8 +136,10 @@ defmodule Kumi.Resource do
 
     {:defmodule, _meta, [_alias, [do: body]]} = Code.string_to_quoted!(source)
     # First form is always `use Ash.Resource, ...` — already applied by
-    # `__using__`. Assert that shape so a Codegen refactor can't silently
-    # drop a real section here instead.
+    # `__using__`, from the same `Codegen.use_opts/1`. Assert that shape so a
+    # Codegen refactor can't silently drop a real section here instead. Only
+    # the shape: the reparsed options hold alias AST where `__using__` passed
+    # module atoms, so comparing the two would never match.
     {:__block__, block_meta, [{:use, _, _} | rest]} = body
     sections = {:__block__, block_meta, rest}
 
@@ -152,11 +172,28 @@ defmodule Kumi.Resource do
     :ok
   end
 
+  # Sections `fields do ... end` never writes anything into, so any entry
+  # at all is extra. Listed one by one rather than found by sweeping every
+  # path in the config: Ash's transformers have already run by the time
+  # `verify_no_extra_ash!/1` does, and add entities of their own (the four
+  # default actions, a `belongs_to`'s `*_id` attribute), so what counts as
+  # generated has to be decided per section.
+  @never_generated [
+    [:code_interface],
+    [:validations],
+    [:changes],
+    [:preparations],
+    [:postgres, :custom_indexes],
+    [:postgres, :check_constraints],
+    [:postgres, :custom_statements]
+  ]
+
   # H1 (blueprint §0 D1): a plain `attributes do ... end` (or
-  # `relationships`/`calculations`/`aggregates`/`identities`) block dropped
-  # in alongside `fields do ... end` compiles fine — Ash has no idea the two
-  # came from different places — but `mix kumi.expand` prints only what
-  # `fields` generated, silently breaking "expand always prints exactly what
+  # `relationships`/`calculations`/`aggregates`/`identities`/`validations`/
+  # `postgres do references do ... end end`, ...) block dropped in alongside
+  # `fields do ... end` compiles fine — Ash has no idea the two came from
+  # different places — but `mix kumi.expand` prints only what `fields`
+  # generated, silently breaking "expand always prints exactly what
   # compiles".
   #
   # The comparison reads Spark's accumulated `@spark_dsl_config` rather than
@@ -179,8 +216,13 @@ defmodule Kumi.Resource do
   # A `CompileError` from `@before_compile` points at the user's own file.
   #
   # `policies` is not checked: `policies do ... end` needs the
-  # `Ash.Policy.Authorizer` extension, which `use Kumi.Resource` never adds,
-  # so it already fails on its own with `undefined function policies/1`.
+  # `Ash.Policy.Authorizer` extension, which `use Kumi.Resource` never adds
+  # (and refuses to be given, see `Codegen.validate_opts!/1`), so it
+  # already fails on its own with `undefined function policies/1`.
+  #
+  # Section *options* are only checked for `postgres`'s `table` and `repo`,
+  # the two `generate/3` writes. Others (`resource do base_filter ... end`,
+  # `multitenancy`, the remaining `postgres` options) are not checked yet.
   defp verify_no_extra_ash!(env) do
     expected = Module.get_attribute(env.module, :kumi_expand_members)
     config = Module.get_attribute(env.module, :spark_dsl_config)
@@ -198,16 +240,29 @@ defmodule Kumi.Resource do
         line: env.line
     end
 
-    extras =
+    named_extras =
       [
-        {:attributes, extras_in(config, [:attributes], expected.attributes)},
-        {:relationships, extras_in(config, [:relationships], expected.relationships)},
-        {:actions, extras_in(config, [:actions], expected.actions)},
-        {:calculations, extras_in(config, [:calculations], [])},
-        {:aggregates, extras_in(config, [:aggregates], [])},
-        {:identities, extras_in(config, [:identities], expected.identities)}
+        {[:attributes], & &1.name, expected.attributes},
+        {[:relationships], & &1.name, expected.relationships},
+        {[:actions], & &1.name, expected.actions},
+        {[:calculations], & &1.name, []},
+        {[:aggregates], & &1.name, []},
+        {[:identities], & &1.name, expected.identities},
+        {[:postgres, :references], & &1.relationship, expected.references}
       ]
-      |> Enum.reject(fn {_kind, names} -> names == [] end)
+      |> Enum.map(fn {path, name_of, expected_names} ->
+        {path, Enum.map(entities(config, path), name_of) -- expected_names}
+      end)
+      |> Enum.reject(fn {_path, names} -> names == [] end)
+      |> Enum.map(fn {path, names} -> {path, inspect(names)} end)
+
+    unexpected_entries =
+      @never_generated
+      |> Enum.map(&{&1, length(entities(config, &1))})
+      |> Enum.reject(fn {_path, count} -> count == 0 end)
+      |> Enum.map(fn {path, count} -> {path, "#{count} declared"} end)
+
+    extras = named_extras ++ unexpected_entries ++ overridden_postgres_opts(env.module, config)
 
     if extras != [] do
       raise CompileError,
@@ -219,21 +274,25 @@ defmodule Kumi.Resource do
     :ok
   end
 
-  defp extras_in(config, path, expected_names) do
-    config
-    |> get_in([path, :entities])
-    |> Kernel.||([])
-    |> extra_names(expected_names)
-  end
+  defp entities(config, path), do: get_in(config, [path, :entities]) || []
 
-  defp extra_names(members, expected_names) do
-    members
-    |> Enum.map(& &1.name)
-    |> Kernel.--(expected_names)
+  # `generate/3` also writes `table` and `repo` into `postgres do ... end`,
+  # from the `use Kumi.Resource` options. A second `postgres do table ...
+  # end` replaces the value rather than failing, so compare the result.
+  defp overridden_postgres_opts(module, config) do
+    kumi_opts = Module.get_attribute(module, :kumi_resource_opts)
+    postgres_opts = get_in(config, [[:postgres], :opts]) || []
+
+    [:table, :repo]
+    |> Enum.map(&{&1, Keyword.get(postgres_opts, &1), Keyword.fetch!(kumi_opts, &1)})
+    |> Enum.reject(fn {_key, compiled, declared} -> compiled == declared end)
+    |> Enum.map(fn {key, compiled, declared} ->
+      {[:postgres, key], "#{inspect(compiled)} (`use Kumi.Resource` says #{inspect(declared)})"}
+    end)
   end
 
   defp extra_ash_message(module, extras) do
-    lines = Enum.map(extras, fn {kind, names} -> "  #{kind}: #{inspect(names)}" end)
+    lines = Enum.map(extras, fn {path, found} -> "  #{Enum.join(path, ".")}: #{found}" end)
 
     """
     Kumi.Resource: #{inspect(module)} declares plain Ash DSL sections that \

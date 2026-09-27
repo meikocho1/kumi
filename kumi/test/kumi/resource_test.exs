@@ -75,6 +75,13 @@ defmodule Kumi.ResourceTest do
 
       assert AshPostgres.DataLayer.Info.table(recompiled) ==
                AshPostgres.DataLayer.Info.table(Customer)
+
+      # The `use Ash.Resource` line: printed by `generate/3`, but expanded by
+      # `Kumi.Resource.__using__/1` rather than spliced in.
+      assert Ash.Resource.Info.domain(recompiled) == Ash.Resource.Info.domain(Customer)
+      assert Ash.Resource.Info.data_layer(recompiled) == Ash.Resource.Info.data_layer(Customer)
+      assert Ash.Resource.Info.authorizers(recompiled) == Ash.Resource.Info.authorizers(Customer)
+      assert Enum.sort(Spark.extensions(recompiled)) == Enum.sort(Spark.extensions(Customer))
     end
 
     test "expand is pure — calling it twice returns byte-identical source" do
@@ -142,13 +149,6 @@ defmodule Kumi.ResourceTest do
   end
 
   describe "H1 — @before_compile rejects plain Ash sections mixed into `fields do ... end`" do
-    # `@after_verify`-raised exceptions run in a separate checker process
-    # (Module.ParallelChecker) linked to the compiling process — they
-    # surface as an `exit` signal, not a normal raise `assert_raise` can
-    # catch (this is also why Spark's own DSL verifiers route through
-    # `Spark.Test` instead of `assert_raise` — see that module's
-    # moduledoc). `compile_and_catch_after_verify_error/1` traps and
-    # unwraps that exit so the specific error message can be asserted on.
     test "a plain `attributes do ... end` block alongside `fields do ... end` fails to compile" do
       source = """
       defmodule Kumi.Test.Resource.MixedAttributesCheck do
@@ -239,6 +239,135 @@ defmodule Kumi.ResourceTest do
 
       assert %CompileError{description: message} = error
       assert message =~ "calculations: [:shout]"
+    end
+
+    # Sections `fields do ... end` never writes into: any entry is extra.
+    # Without the check each of these compiles cleanly, and each changes
+    # either the database (and with it `kumi.plan`'s desired state) or the
+    # resource's behaviour, so each is checked against a real compile.
+    for {section, dsl} <- [
+          {"code_interface",
+           """
+           code_interface do
+             define :create
+           end
+           """},
+          {"validations",
+           """
+           validations do
+             validate present(:name)
+           end
+           """},
+          {"changes",
+           """
+           changes do
+             change set_attribute(:name, "x")
+           end
+           """},
+          {"preparations",
+           """
+           preparations do
+             prepare build(sort: [:name])
+           end
+           """},
+          {"postgres.custom_indexes",
+           """
+           postgres do
+             custom_indexes do
+               index [:name]
+             end
+           end
+           """},
+          {"postgres.check_constraints",
+           """
+           postgres do
+             check_constraints do
+               check_constraint :name, "name_not_blank", check: "name <> ''"
+             end
+           end
+           """},
+          {"postgres.custom_statements",
+           """
+           postgres do
+             custom_statements do
+               statement :noop do
+                 up "SELECT 1"
+                 down "SELECT 1"
+               end
+             end
+           end
+           """}
+        ] do
+      test "a plain `#{section}` entry alongside `fields do ... end` fails to compile" do
+        module = "Mixed#{Macro.camelize(String.replace(unquote(section), ".", "_"))}Check"
+
+        {:error, error} = compile_and_expect_error(mixed_source(module, unquote(dsl)))
+
+        assert %CompileError{description: message} = error
+        assert message =~ "#{unquote(section)}: 1 declared"
+      end
+    end
+
+    test "a hand-written `postgres do references do ... end end` fails to compile" do
+      # The case that motivated covering `references`: without `on_delete:`
+      # the shorthand prints no `references` block, so this would compile an
+      # ON DELETE CASCADE foreign key that `mix kumi.expand` never shows.
+      # (The legitimate `belongs_to ..., on_delete:` spelling is not flagged
+      # — see "the emitted DSL is real" below, which compiles it.)
+      source =
+        mixed_source("MixedReferencesCheck", """
+        postgres do
+          references do
+            reference :account, on_delete: :delete
+          end
+        end
+        """)
+
+      {:error, error} = compile_and_expect_error(source)
+
+      assert %CompileError{description: message} = error
+      assert message =~ "postgres.references: [:account]"
+    end
+
+    test "a second `postgres do table ... end` fails to compile" do
+      # Spark keeps the last value rather than rejecting the repeat, so this
+      # would silently move the resource to another table.
+      source =
+        mixed_source("MixedTableCheck", """
+        postgres do
+          table "somewhere_else"
+        end
+        """)
+
+      {:error, error} = compile_and_expect_error(source)
+
+      assert %CompileError{description: message} = error
+
+      assert message =~
+               ~s[postgres.table: "somewhere_else" (`use Kumi.Resource` says "kumi_test_resource_mixed_table_check")]
+    end
+
+    test "a second `postgres do repo ... end` fails to compile" do
+      source =
+        """
+        defmodule Kumi.Test.Resource.MixedRepoCheckRepo do
+          use AshPostgres.Repo, otp_app: :kumi, warn_on_missing_ash_functions?: false
+
+          def min_pg_version, do: %Version{major: 16, minor: 0, patch: 0}
+        end
+        """ <>
+          mixed_source("MixedRepoCheck", """
+          postgres do
+            repo Kumi.Test.Resource.MixedRepoCheckRepo
+          end
+          """)
+
+      {:error, error} = compile_and_expect_error(source)
+
+      assert %CompileError{description: message} = error
+
+      assert message =~
+               "postgres.repo: Kumi.Test.Resource.MixedRepoCheckRepo (`use Kumi.Resource` says Kumi.Test.Repo)"
     end
 
     test "negative case: a pure-shorthand module still compiles fine, expand-vs-compiled equivalence still holds" do
@@ -513,22 +642,35 @@ defmodule Kumi.ResourceTest do
     end
   end
 
-  # `@after_verify` failures crash the (linked) compiler-checker process
-  # rather than raising in the calling process, so `assert_raise` can't
-  # observe them directly. Compiling inside a `Task` we're linked to (and
-  # trapping exits for) converts that crash into a normal `catch :exit`
-  # in this process, from which the original raised exception can be
-  # recovered. Stderr is captured because Ash also logs an unrelated
-  # "not present in any known Ash.Domain" warning for these
-  # not-registered-in-ResourceDomain probe modules — same reason the
-  # expand-invariant test above captures it.
+  # A shorthand module with `extra` (plain Ash DSL) declared after its
+  # `fields do ... end`.
+  defp mixed_source(name, extra) do
+    """
+    defmodule Kumi.Test.Resource.#{name} do
+      use Kumi.Resource,
+        domain: Kumi.Test.ResourceDomain,
+        repo: Kumi.Test.Repo,
+        table: "kumi_test_resource_#{Macro.underscore(name)}"
+
+      fields do
+        field :name, :string, required: true
+        belongs_to :account, Kumi.Test.Resource.Account
+      end
+
+    #{extra}
+    end
+    """
+  end
+
   # The D1 completeness check raises a CompileError from
   # `Kumi.Resource.__before_compile__/1`, i.e. synchronously during macro
   # expansion — so `rescue` sees it directly, unlike the `@after_verify`
   # mechanism this originally used (that one raises inside
-  # `Module.ParallelChecker` and reaches the caller as an EXIT).
-  # `capture_io/2` returns the captured output rather than the function's
-  # value, hence the process-dictionary hand-off.
+  # `Module.ParallelChecker` and reaches the caller as an EXIT). Stderr is
+  # captured for the same unrelated "not present in any known Ash.Domain"
+  # warning the expand-invariant test captures. `capture_io/2` returns the
+  # captured output rather than the function's value, hence the
+  # process-dictionary hand-off.
   defp compile_and_expect_error(source) do
     key = make_ref()
 
@@ -545,6 +687,80 @@ defmodule Kumi.ResourceTest do
     end)
 
     Process.get(key)
+  end
+
+  # Nothing but `domain:` reaches `use Ash.Resource`, so any other option
+  # used to be accepted and dropped — the same class H2 closed for fields.
+  describe "`use Kumi.Resource` options" do
+    test "`extensions:` is rejected rather than silently dropped" do
+      source = """
+      defmodule Kumi.Test.Resource.ExtensionsOptCheck do
+        use Kumi.Resource,
+          domain: Kumi.Test.ResourceDomain,
+          repo: Kumi.Test.Repo,
+          table: "kumi_test_resource_extensions_opt_check",
+          extensions: [Ash.Policy.Authorizer]
+
+        fields do
+          field :name, :string
+        end
+      end
+      """
+
+      assert {:error, %ArgumentError{message: message}} = compile_and_expect_error(source)
+      assert message =~ "unexpected or repeated option(s) [:extensions]"
+      assert message =~ "belongs in plain Ash"
+    end
+
+    test "a missing `repo:` is a readable ArgumentError, not a KeyError from Codegen" do
+      source = """
+      defmodule Kumi.Test.Resource.MissingRepoOptCheck do
+        use Kumi.Resource,
+          domain: Kumi.Test.ResourceDomain,
+          table: "kumi_test_resource_missing_repo_opt_check"
+
+        fields do
+          field :name, :string
+        end
+      end
+      """
+
+      assert {:error, %ArgumentError{message: message}} = compile_and_expect_error(source)
+      assert message =~ "missing option(s) [:repo]"
+      assert message =~ "It takes exactly `domain:`, `repo:` and `table:`"
+    end
+
+    test "a misspelled key is reported as both unexpected and missing" do
+      assert_raise ArgumentError,
+                   ~r/unexpected or repeated option\(s\) \[:tabel\], missing option\(s\) \[:table\]/,
+                   fn ->
+                     Kumi.Resource.Codegen.validate_opts!(
+                       domain: Kumi.Test.ResourceDomain,
+                       repo: Kumi.Test.Repo,
+                       tabel: "widgets"
+                     )
+                   end
+    end
+
+    test "a key given twice is rejected, not resolved by taking the first" do
+      assert_raise ArgumentError, ~r/unexpected or repeated option\(s\) \[:table\]/, fn ->
+        Kumi.Resource.Codegen.validate_opts!(
+          domain: Kumi.Test.ResourceDomain,
+          repo: Kumi.Test.Repo,
+          table: "widgets",
+          table: "gadgets"
+        )
+      end
+    end
+
+    test "the three options pass" do
+      assert :ok =
+               Kumi.Resource.Codegen.validate_opts!(
+                 domain: Kumi.Test.ResourceDomain,
+                 repo: Kumi.Test.Repo,
+                 table: "widgets"
+               )
+    end
   end
 
   describe "H2 — field option whitelist (FieldSpec.parse/2)" do

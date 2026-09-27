@@ -32,11 +32,11 @@ defmodule Kumi.Resource.FieldSpec do
   # `:to` names the belongs_to destination and is consumed during parsing
   # (never stored) — listed here so it counts as accepted rather than
   # showing up in an "unknown option" message. A *missing* `:to` is
-  # caught earlier by the `Keyword.fetch` above with its own dedicated
-  # message; a *misspelled* `to:` (e.g. `too:`) is indistinguishable from
-  # missing and surfaces that same message, not this whitelist's — which
-  # is fine, since "requires a `to:` target" is the more actionable of
-  # the two for that case.
+  # caught first, by the `Keyword.fetch` in `parse_expr/2`, with its own
+  # dedicated message; a *misspelled* `to:` (e.g. `too:`) is
+  # indistinguishable from missing and surfaces that same message, not this
+  # whitelist's — which is fine, since "requires a `to:` target" is the
+  # more actionable of the two for that case.
   @image_field_opts [:to, :required]
 
   # What a `belongs_to` accepts. `:on_delete` is the delete rule for the
