@@ -124,6 +124,11 @@ defmodule Kumi.ResourceTest do
       assert Customer.__kumi_expand__() =~ "defmodule Kumi.Test.Resource.Customer do"
       assert Customer.__kumi_expand__() =~ "use Ash.Resource,"
       assert Customer.__kumi_expand__() =~ "table(\"kumi_test_resource_customers\")"
+
+      # Printed from `Codegen.default_actions/0`, in the keyword spelling a
+      # hand-written resource uses.
+      assert Customer.__kumi_expand__() =~
+               "defaults([:read, :destroy, create: :*, update: :*])"
     end
 
     test "mix kumi.expand prints exactly __kumi_expand__/0's output" do
@@ -368,6 +373,31 @@ defmodule Kumi.ResourceTest do
 
       assert message =~
                "postgres.repo: Kumi.Test.Resource.MixedRepoCheckRepo (`use Kumi.Resource` says Kumi.Test.Repo)"
+    end
+
+    # `generate/3` writes `defaults` too, and a second `actions do defaults
+    # ... end` replaces it the same way. The action names that come out are
+    # still among the four `fields do ... end` generated, so the entity check
+    # alone does not see an action that went missing or accepts less.
+    for {module, defaults} <- [
+          {"MixedDefaultsDropCheck", "[:read]"},
+          {"MixedDefaultsAcceptCheck", "[:read, :destroy, create: [:name], update: []]"}
+        ] do
+      test "a second `actions do defaults #{defaults} end` fails to compile" do
+        source =
+          mixed_source(unquote(module), """
+          actions do
+            defaults #{unquote(defaults)}
+          end
+          """)
+
+        {:error, error} = compile_and_expect_error(source)
+
+        assert %CompileError{description: message} = error
+
+        assert message =~
+                 "actions.defaults: #{unquote(defaults)} (`fields do ... end` generates [:read, :destroy, create: :*, update: :*])"
+      end
     end
 
     test "negative case: a pure-shorthand module still compiles fine, expand-vs-compiled equivalence still holds" do

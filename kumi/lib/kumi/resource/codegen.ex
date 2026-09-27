@@ -13,12 +13,20 @@ defmodule Kumi.Resource.Codegen do
   # to catch "not-an-email" while accepting ordinary addresses.
   @email_regex_source "~r/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/"
 
-  # Mirrors the fixed attributes/actions `generate/3`'s template always
-  # emits (`uuid_primary_key :id`, `timestamps()`, the default action set)
-  # — kept alongside `emitted_members/1` since that's the only other place
-  # that needs to know the same fixed list.
+  # Mirrors the fixed attributes `generate/3`'s template always emits
+  # (`uuid_primary_key :id`, `timestamps()`) — kept alongside
+  # `emitted_members/1` since that's the only other place that needs to
+  # know the same fixed list.
   @default_attribute_names [:id, :inserted_at, :updated_at]
-  @default_action_names [:read, :destroy, :create, :update]
+
+  # The `defaults` `generate/3` prints in `actions do ... end`. The action
+  # names `emitted_members/1` reports are read off it, and
+  # `default_actions/0` hands it to `Kumi.Resource`'s check.
+  @default_actions [:read, :destroy, create: :*, update: :*]
+  @default_action_names Enum.map(@default_actions, fn
+                          {type, _accept} -> type
+                          type -> type
+                        end)
 
   @use_opt_keys [:domain, :repo, :table]
 
@@ -94,6 +102,15 @@ defmodule Kumi.Resource.Codegen do
   end
 
   @doc """
+  The `defaults` list `generate/3` prints in `actions do ... end`.
+  `Kumi.Resource` compares the compiled resource's `defaults` against it,
+  because a second `actions do defaults ... end` replaces the value rather
+  than failing.
+  """
+  @spec default_actions() :: [atom() | {atom(), atom() | [atom()]}]
+  def default_actions, do: @default_actions
+
+  @doc """
   The attribute/relationship/action/identity/reference names `generate/3`
   actually emits for these field specs. Used by `Kumi.Resource`'s
   `@before_compile` check (`Kumi.Resource.__before_compile__/1`; H1 fix,
@@ -158,7 +175,7 @@ defmodule Kumi.Resource.Codegen do
       end
 
       actions do
-        defaults [:read, :destroy, create: :*, update: :*]
+        defaults #{Macro.to_string(@default_actions)}
       end
 
       attributes do

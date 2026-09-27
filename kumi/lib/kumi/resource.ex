@@ -73,12 +73,13 @@ defmodule Kumi.Resource do
     * any `calculations`, `aggregates`, `code_interface`, `validations`,
       `changes` or `preparations` entry, or any `postgres` `custom_indexes`,
       `check_constraints` or `custom_statements` entry;
-    * a `postgres` `table` or `repo` other than the `use` options.
+    * a `postgres` `table` or `repo` other than the `use` options, or an
+      `actions` `defaults` other than the four default actions.
 
   Other section options (`resource do base_filter ... end`,
-  `multitenancy`, the rest of `postgres`) are not checked yet. They would
-  compile without `mix kumi.expand` printing them, so set them in plain
-  Ash only.
+  `multitenancy`, `actions do default_accept ... end`, the rest of
+  `postgres`) are not checked yet. They would compile without `mix
+  kumi.expand` printing them, so set them in plain Ash only.
 
   ## Implementation note
 
@@ -220,9 +221,11 @@ defmodule Kumi.Resource do
   # (and refuses to be given, see `Codegen.validate_opts!/1`), so it
   # already fails on its own with `undefined function policies/1`.
   #
-  # Section *options* are only checked for `postgres`'s `table` and `repo`,
-  # the two `generate/3` writes. Others (`resource do base_filter ... end`,
-  # `multitenancy`, the remaining `postgres` options) are not checked yet.
+  # Section *options* are only checked for the three `generate/3` writes:
+  # `postgres`'s `table` and `repo`, and `actions`'s `defaults`. Others
+  # (`resource do base_filter ... end`, `multitenancy`, `actions do
+  # default_accept ... end`, the remaining `postgres` options) are not
+  # checked yet.
   defp verify_no_extra_ash!(env) do
     expected = Module.get_attribute(env.module, :kumi_expand_members)
     config = Module.get_attribute(env.module, :spark_dsl_config)
@@ -262,7 +265,7 @@ defmodule Kumi.Resource do
       |> Enum.reject(fn {_path, count} -> count == 0 end)
       |> Enum.map(fn {path, count} -> {path, "#{count} declared"} end)
 
-    extras = named_extras ++ unexpected_entries ++ overridden_postgres_opts(env.module, config)
+    extras = named_extras ++ unexpected_entries ++ overridden_opts(env.module, config)
 
     if extras != [] do
       raise CompileError,
@@ -276,20 +279,48 @@ defmodule Kumi.Resource do
 
   defp entities(config, path), do: get_in(config, [path, :entities]) || []
 
-  # `generate/3` also writes `table` and `repo` into `postgres do ... end`,
-  # from the `use Kumi.Resource` options. A second `postgres do table ...
-  # end` replaces the value rather than failing, so compare the result.
-  defp overridden_postgres_opts(module, config) do
+  # `generate/3` also writes section options: `table` and `repo` into
+  # `postgres do ... end`, from the `use Kumi.Resource` options, and
+  # `defaults` into `actions do ... end`. A second `postgres do table ...
+  # end` or `actions do defaults ... end` replaces the value rather than
+  # failing, so compare the result.
+  defp overridden_opts(module, config) do
     kumi_opts = Module.get_attribute(module, :kumi_resource_opts)
-    postgres_opts = get_in(config, [[:postgres], :opts]) || []
 
-    [:table, :repo]
-    |> Enum.map(&{&1, Keyword.get(postgres_opts, &1), Keyword.fetch!(kumi_opts, &1)})
-    |> Enum.reject(fn {_key, compiled, declared} -> compiled == declared end)
-    |> Enum.map(fn {key, compiled, declared} ->
-      {[:postgres, key], "#{inspect(compiled)} (`use Kumi.Resource` says #{inspect(declared)})"}
+    [
+      {[:postgres], :table, Keyword.fetch!(kumi_opts, :table), "`use Kumi.Resource` says"},
+      {[:postgres], :repo, Keyword.fetch!(kumi_opts, :repo), "`use Kumi.Resource` says"},
+      {[:actions], :defaults, Kumi.Resource.Codegen.default_actions(),
+       "`fields do ... end` generates"}
+    ]
+    |> Enum.map(fn {section, key, expected, source} ->
+      compiled = Keyword.get(get_in(config, [section, :opts]) || [], key)
+      {section ++ [key], compiled, expected, source}
+    end)
+    |> Enum.reject(fn {path, compiled, expected, _source} ->
+      normalize_opt(path, compiled) == normalize_opt(path, expected)
+    end)
+    |> Enum.map(fn {path, compiled, expected, source} ->
+      {path, "#{show_opt(compiled)} (#{source} #{show_opt(expected)})"}
     end)
   end
+
+  # Spark validates each `defaults` entry against `{:tuple, [:atom,
+  # {:wrap_list, :atom}]}`, so the compiled value holds `create: [:*]`
+  # where `generate/3` printed `create: :*`. Both build the same actions.
+  defp normalize_opt([:actions, :defaults], defaults) when is_list(defaults) do
+    Enum.map(defaults, fn
+      {type, accept} -> {type, List.wrap(accept)}
+      type -> type
+    end)
+  end
+
+  defp normalize_opt(_path, value), do: value
+
+  # `defaults` in the keyword spelling it is written in (`create: :*`, not
+  # `{:create, :*}`); every other value as `inspect/1` shows it.
+  defp show_opt(value) when is_list(value), do: Macro.to_string(value)
+  defp show_opt(value), do: inspect(value)
 
   defp extra_ash_message(module, extras) do
     lines = Enum.map(extras, fn {path, found} -> "  #{Enum.join(path, ".")}: #{found}" end)
