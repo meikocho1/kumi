@@ -66,6 +66,23 @@ defmodule Kumi.Desired.PgTypeTest do
       # udt_name — a permanent phantom type-change diff.
       assert PgType.from_ash(Ash.Type.Duration, []) == "interval"
     end
+
+    # Same bug class as :duration: each of these migration types used to
+    # fall through to its own atom name, which is never a real udt_name,
+    # so the column showed a permanent DANGEROUS type change.
+    test "float -> float8" do
+      assert PgType.from_ash(Ash.Type.Float, []) == "float8"
+    end
+
+    test "binary and term (storage type :binary) -> bytea" do
+      assert PgType.from_ash(Ash.Type.Binary, []) == "bytea"
+      assert PgType.from_ash(Ash.Type.Term, []) == "bytea"
+    end
+
+    test "time with microsecond precision (:time_usec) -> time" do
+      assert PgType.from_ash(Ash.Type.Time, precision: :microsecond) == "time"
+      assert PgType.from_ash(Ash.Type.Time, precision: :second) == "time"
+    end
   end
 
   describe "precision_from_ash/2 (empirically verified against the real spike DB, see moduledoc)" do
