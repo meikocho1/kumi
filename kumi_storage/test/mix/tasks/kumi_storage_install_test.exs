@@ -57,6 +57,40 @@ defmodule Mix.Tasks.KumiStorage.InstallTest do
       assert content =~ "attribute :byte_size, :integer"
     end
 
+    test "defines __kumi_storage_config__/0, the one place storage config is read" do
+      igniter =
+        test_project(app_name: :my_app)
+        |> Igniter.compose_task("kumi_storage.install", [])
+
+      {_igniter, source, _zipper} =
+        Igniter.Project.Module.find_module!(igniter, MyApp.Core.Attachment)
+
+      content = Rewrite.Source.get(source, :content)
+
+      assert content =~ "def __kumi_storage_config__ do"
+      assert content =~ "Application.fetch_env!(:kumi_storage, :backend)"
+      # Both actions go through it; nothing else reads the config.
+      assert length(Regex.scan(~r/__MODULE__\.__kumi_storage_config__\(\)/, content)) == 2
+      assert length(Regex.scan(~r/Application\.fetch_env!/, content)) == 1
+    end
+
+    test "the Ets fixture's :upload and :destroy actions are the generated ones, verbatim" do
+      igniter =
+        test_project(app_name: :my_app)
+        |> Igniter.compose_task("kumi_storage.install", [])
+
+      {_igniter, source, _zipper} =
+        Igniter.Project.Module.find_module!(igniter, MyApp.Core.Attachment)
+
+      generated = source |> Rewrite.Source.get(:content) |> actions()
+
+      fixture =
+        Path.expand("../../support/test_attachment.ex", __DIR__) |> File.read!() |> actions()
+
+      assert Map.fetch!(fixture, :upload) == Map.fetch!(generated, :upload)
+      assert Map.fetch!(fixture, :destroy) == Map.fetch!(generated, :destroy)
+    end
+
     test "generates the :upload create action delegating to KumiStorage.Upload.prepare/3" do
       igniter =
         test_project(app_name: :my_app)
@@ -188,11 +222,12 @@ defmodule Mix.Tasks.KumiStorage.InstallTest do
         |> Igniter.compose_task("kumi_storage.install", [])
 
       assert Enum.any?(igniter.notices, fn n ->
-               IO.iodata_to_binary(n) =~ "KumiStorage.Plug"
+               IO.iodata_to_binary(n) =~
+                 ~s(forward "/uploads", KumiStorage.Plug, config: {MyApp.Core.Attachment, :__kumi_storage_config__})
              end)
     end
 
-    test "router present: forwards KumiStorage.Plug" do
+    test "router present: forwards KumiStorage.Plug with the Attachment's config function" do
       igniter =
         test_project(app_name: :my_app, files: %{"lib/my_app_web/router.ex" => @router})
         |> Igniter.compose_task("kumi_storage.install", [])
@@ -201,7 +236,9 @@ defmodule Mix.Tasks.KumiStorage.InstallTest do
         Igniter.Project.Module.find_module!(igniter, MyAppWeb.Router)
 
       content = Rewrite.Source.get(source, :content)
-      assert content =~ ~r/forward\(?\s*"\/uploads",\s*KumiStorage\.Plug/
+
+      assert content =~
+               ~r/forward\(?\s*"\/uploads",\s*KumiStorage\.Plug,\s*config:\s*\{MyApp\.Core\.Attachment,\s*:__kumi_storage_config__\}/
     end
 
     test "running twice does not duplicate the mount" do
@@ -218,6 +255,23 @@ defmodule Mix.Tasks.KumiStorage.InstallTest do
                IO.iodata_to_binary(n) =~ "already mounted"
              end)
     end
+  end
+
+  # `%{action_name => body}` for the create/destroy actions in `source`,
+  # with line/column metadata stripped so formatting doesn't matter.
+  defp actions(source) do
+    {_ast, actions} =
+      source
+      |> Code.string_to_quoted!()
+      |> Macro.prewalk(%{}, fn
+        {type, _, [name, [do: body]]} = node, acc when type in [:create, :destroy] ->
+          {node, Map.put(acc, name, Macro.prewalk(body, &Macro.update_meta(&1, fn _ -> [] end)))}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    actions
   end
 
   # `{Module, :fun, arity}` for every `Module.fun(...)` call inside `ast`.

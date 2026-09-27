@@ -1,16 +1,17 @@
 defmodule KumiStorage.Backend do
   @moduledoc """
-  Behaviour for `Kumi.Storage` storage backends (blueprint §6 point 7).
+  Behaviour for `KumiStorage` storage backends (blueprint §6 point 7).
   `KumiStorage.Backend.Local` (filesystem) is the only v1 implementation —
   an S3 backend is a committed follow-up, not a speculative abstraction.
 
   Every callback takes `opts` explicitly. Backends never read Application
-  config themselves — the caller (e.g. `KumiStorage.Plug`, or the run-2
-  LiveView upload consumer) resolves `Application.get_env(:kumi_storage,
-  ...)` once, at its own boundary, and passes the result down. This keeps
-  backends pure and directly testable (no `Application.put_env` needed in
-  their own tests) and matches the repo-wide "library code takes explicit
-  args" convention.
+  config themselves, and neither does any other kumi_storage module: the
+  generated Attachment's `__kumi_storage_config__/0` reads
+  `config :kumi_storage, ...` in host code, and its actions (through
+  `KumiStorage.Upload`) and `KumiStorage.Plug` pass the result down. This
+  keeps backends pure and directly testable (no `Application.put_env`
+  needed in their own tests) and matches the repo-wide "library code takes
+  explicit args" convention.
   """
 
   @typedoc "Opaque, backend-assigned identifier for a stored file."

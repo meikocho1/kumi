@@ -26,8 +26,9 @@ The installer composes `mix kumi.install` and then does three things:
    `<App>.Core`.
 2. Adds `config :kumi_storage, backend: KumiStorage.Backend.Local, root:
    "priv/uploads"` if nothing is configured yet.
-3. Forwards a router path to `KumiStorage.Plug`, or prints the snippet if
-   it can't find a router to edit.
+3. Forwards a router path to `KumiStorage.Plug` (see
+   [Backends](#backends) for its `config:` option), or prints the snippet
+   if it can't find a router to edit.
 
 `mix kumi.new my_app --with storage` does all of this at generation time.
 
@@ -79,7 +80,9 @@ fixes to them arrive with a dependency upgrade. An Attachment generated
 before `KumiStorage.Upload` existed still has the old inline change
 bodies, because the installer never overwrites the file: replace its
 `:upload` and `:destroy` actions with the ones the installer generates
-now.
+now, add `__kumi_storage_config__/0`, and give the router's forward its
+`config:` option (see [Backends](#backends)); the plug refuses to
+compile without it.
 
 ## Backends
 
@@ -88,10 +91,19 @@ now.
 planned follow-up rather than a speculative abstraction.
 
 Every callback takes `opts` explicitly — backends never read Application
-config themselves. `KumiStorage.Plug` is the config-reading boundary: it
-resolves `config :kumi_storage, ...` once per request and passes the result
-down. This keeps backends pure and directly testable, and matches the
-repo-wide "library code takes explicit args" rule.
+config themselves, and neither does any other kumi_storage module. The
+config boundary is host code: the generated Attachment's
+`__kumi_storage_config__/0` reads `config :kumi_storage, ...` and returns
+`{backend, backend_opts}`. Its actions call it, and the router hands it to
+the plug, which calls it once per request (so `config/runtime.exs` works):
+
+```elixir
+forward "/uploads", KumiStorage.Plug,
+  config: {MyApp.Core.Attachment, :__kumi_storage_config__}
+```
+
+This keeps backends pure and directly testable, and matches the repo-wide
+"library code takes explicit args" rule.
 
 ## Serving
 

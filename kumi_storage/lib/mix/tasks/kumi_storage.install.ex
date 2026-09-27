@@ -23,7 +23,9 @@ defmodule Mix.Tasks.KumiStorage.Install.Docs do
       2. Adds `config :kumi_storage, backend: KumiStorage.Backend.Local,
          root: "priv/uploads"` if not already configured.
       3. Forwards a path to `KumiStorage.Plug` in your Phoenix router, if
-         one is found (otherwise prints the snippet to add by hand).
+         one is found (otherwise prints the snippet to add by hand), with
+         `config: {<App>.Core.Attachment, :__kumi_storage_config__}` — the
+         generated function the plug reads its backend config from.
 
     ## Example
 
@@ -132,8 +134,7 @@ if Code.ensure_loaded?(Igniter) do
           argument :byte_size, :integer
 
           change fn changeset, _context ->
-            backend = Application.fetch_env!(:kumi_storage, :backend)
-            backend_opts = Application.get_all_env(:kumi_storage) |> Keyword.delete(:backend)
+            {backend, backend_opts} = __MODULE__.__kumi_storage_config__()
 
             KumiStorage.Upload.prepare(changeset, backend, backend_opts)
           end
@@ -146,8 +147,7 @@ if Code.ensure_loaded?(Igniter) do
           # After the commit, so a rolled-back destroy keeps its file. A
           # failed delete is logged; the destroy still succeeds.
           change after_transaction(fn _changeset, result, _context ->
-            backend = Application.fetch_env!(:kumi_storage, :backend)
-            backend_opts = Application.get_all_env(:kumi_storage) |> Keyword.delete(:backend)
+            {backend, backend_opts} = __MODULE__.__kumi_storage_config__()
 
             KumiStorage.Upload.delete_stored(result, backend, backend_opts)
           end)
@@ -185,6 +185,16 @@ if Code.ensure_loaded?(Igniter) do
 
       @doc "Public URL for a stored attachment — matches the `/uploads` forward this installer adds to your router."
       def __kumi_attachment_url__(record), do: "/uploads/\#{record.storage_key}"
+
+      @doc \"\"\"
+      `{backend, backend_opts}` from `config :kumi_storage` — the one place
+      storage config is read. The actions above call it, and so does
+      `KumiStorage.Plug` through the `config:` option of its router forward.
+      \"\"\"
+      def __kumi_storage_config__ do
+        {Application.fetch_env!(:kumi_storage, :backend),
+         Application.get_all_env(:kumi_storage) |> Keyword.delete(:backend)}
+      end
       """
     end
 
@@ -205,6 +215,8 @@ if Code.ensure_loaded?(Igniter) do
     end
 
     defp mount_plug(igniter) do
+      attachment_module = Igniter.Project.Module.module_name(igniter, "Core.Attachment")
+
       {igniter, router} =
         Igniter.Libs.Phoenix.select_router(
           igniter,
@@ -213,7 +225,7 @@ if Code.ensure_loaded?(Igniter) do
 
       cond do
         router == nil ->
-          Igniter.add_notice(igniter, no_router_snippet())
+          Igniter.add_notice(igniter, no_router_snippet(attachment_module))
 
         already_mounted?(igniter, router) ->
           Igniter.add_notice(
@@ -223,7 +235,7 @@ if Code.ensure_loaded?(Igniter) do
 
         true ->
           igniter
-          |> Igniter.Libs.Phoenix.add_scope("/", "forward \"/uploads\", KumiStorage.Plug",
+          |> Igniter.Libs.Phoenix.add_scope("/", forward(attachment_module),
             router: router,
             placement: :after
           )
@@ -239,17 +251,24 @@ if Code.ensure_loaded?(Igniter) do
       match?(
         {:ok, _},
         Igniter.Code.Common.move_to(zipper, fn z ->
-          Igniter.Code.Function.function_call?(z, :forward, [2]) and
+          Igniter.Code.Function.function_call?(z, :forward, [2, 3]) and
             Igniter.Code.Function.argument_equals?(z, 1, KumiStorage.Plug)
         end)
       )
     end
 
-    defp no_router_snippet do
+    # The plug resolves its config through the Attachment's
+    # __kumi_storage_config__/0 on every request; kumi_storage itself never
+    # reads Application config.
+    defp forward(attachment_module) do
+      "forward \"/uploads\", KumiStorage.Plug, config: {#{inspect(attachment_module)}, :__kumi_storage_config__}"
+    end
+
+    defp no_router_snippet(attachment_module) do
       """
       Kumi Storage: no Phoenix router found or selected. Mount it manually:
 
-          forward "/uploads", KumiStorage.Plug
+          #{forward(attachment_module)}
       """
     end
   end

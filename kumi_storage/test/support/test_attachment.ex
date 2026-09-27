@@ -10,15 +10,15 @@ end
 defmodule KumiStorage.Test.Attachment do
   @moduledoc """
   The Attachment resource `mix kumi_storage.install` generates, on
-  `Ash.DataLayer.Ets`: its `:upload` and destroy actions call
-  `KumiStorage.Upload` exactly as the generated source does, so the
+  `Ash.DataLayer.Ets`: its `:upload` and `:destroy` actions are the
+  generated ones verbatim (the installer test checks that), so the
   package's tests run the real trust boundary rather than matching the
   template's text.
 
-  Two differences, both test-only: `storage_config/0` reads the backend
-  from the test process (so tests stay async, each with its own root), and
+  Test-only differences: `__kumi_storage_config__/0` reads the backend from
+  the test process (so tests stay async, each with its own root),
   `KumiStorage.Test.BlockedActorAuthorizer` stands in for a host's
-  policies.
+  policies, and `:upload_then_fail` fails after the store.
   """
 
   use Ash.Resource,
@@ -42,7 +42,7 @@ defmodule KumiStorage.Test.Attachment do
       argument :byte_size, :integer
 
       change fn changeset, _context ->
-        {backend, backend_opts} = __MODULE__.storage_config()
+        {backend, backend_opts} = __MODULE__.__kumi_storage_config__()
 
         KumiStorage.Upload.prepare(changeset, backend, backend_opts)
       end
@@ -59,7 +59,7 @@ defmodule KumiStorage.Test.Attachment do
       argument :byte_size, :integer
 
       change fn changeset, _context ->
-        {backend, backend_opts} = __MODULE__.storage_config()
+        {backend, backend_opts} = __MODULE__.__kumi_storage_config__()
 
         KumiStorage.Upload.prepare(changeset, backend, backend_opts)
       end
@@ -74,7 +74,7 @@ defmodule KumiStorage.Test.Attachment do
       require_atomic? false
 
       change after_transaction(fn _changeset, result, _context ->
-               {backend, backend_opts} = __MODULE__.storage_config()
+               {backend, backend_opts} = __MODULE__.__kumi_storage_config__()
 
                KumiStorage.Upload.delete_stored(result, backend, backend_opts)
              end)
@@ -108,7 +108,7 @@ defmodule KumiStorage.Test.Attachment do
   end
 
   @doc "`{backend, backend_opts}` for the current test process."
-  def storage_config do
+  def __kumi_storage_config__ do
     Process.get(:kumi_storage_test_config) ||
       raise "put {backend, opts} under :kumi_storage_test_config in the test process first"
   end
