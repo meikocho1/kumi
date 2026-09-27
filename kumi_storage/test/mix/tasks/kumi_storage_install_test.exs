@@ -57,6 +57,20 @@ defmodule Mix.Tasks.KumiStorage.InstallTest do
       assert content =~ "attribute :byte_size, :integer"
     end
 
+    test "storage_key is private: the key is all that protects a file's URL" do
+      igniter =
+        test_project(app_name: :my_app)
+        |> Igniter.compose_task("kumi_storage.install", [])
+
+      {_igniter, source, _zipper} =
+        Igniter.Project.Module.find_module!(igniter, MyApp.Core.Attachment)
+
+      content = Rewrite.Source.get(source, :content)
+
+      assert content =~
+               ~r/attribute :storage_key, :string do\s+allow_nil\?\(?\s*false\)?\s+public\?\(?\s*false\)?/
+    end
+
     test "defines __kumi_storage_config__/0, the one place storage config is read" do
       igniter =
         test_project(app_name: :my_app)
@@ -213,6 +227,32 @@ defmodule Mix.Tasks.KumiStorage.InstallTest do
 
       assert length(Regex.scan(~r/KumiStorage\.Backend\.Local/, config_content)) == 1
     end
+
+    test "adds the default upload root to .gitignore, keeping what was there" do
+      igniter =
+        test_project(app_name: :my_app)
+        |> Igniter.compose_task("kumi_storage.install", [])
+
+      gitignore = igniter.rewrite |> Rewrite.source!(".gitignore") |> Rewrite.Source.get(:content)
+
+      assert gitignore =~ ~r{^/priv/uploads/$}m
+      assert gitignore =~ ~r{^/_build/$}m
+
+      assert Enum.any?(igniter.notices, fn n ->
+               IO.iodata_to_binary(n) =~ "config/runtime.exs"
+             end)
+    end
+
+    test "running twice does not duplicate the .gitignore entry" do
+      igniter =
+        test_project(app_name: :my_app)
+        |> Igniter.compose_task("kumi_storage.install", [])
+        |> apply_igniter!()
+
+      igniter = Igniter.compose_task(igniter, "kumi_storage.install", [])
+
+      assert_unchanged(igniter, ".gitignore")
+    end
   end
 
   describe "router mount" do
@@ -221,10 +261,16 @@ defmodule Mix.Tasks.KumiStorage.InstallTest do
         test_project(app_name: :my_app)
         |> Igniter.compose_task("kumi_storage.install", [])
 
-      assert Enum.any?(igniter.notices, fn n ->
-               IO.iodata_to_binary(n) =~
-                 ~s(forward "/uploads", KumiStorage.Plug, config: {MyApp.Core.Attachment, :__kumi_storage_config__})
-             end)
+      notice =
+        Enum.find_value(igniter.notices, fn n ->
+          n = IO.iodata_to_binary(n)
+          if n =~ "KumiStorage.Plug", do: n
+        end)
+
+      assert notice =~
+               ~s(forward "/uploads", KumiStorage.Plug, config: {MyApp.Core.Attachment, :__kumi_storage_config__})
+
+      assert notice =~ "public to anyone holding the URL"
     end
 
     test "router present: forwards KumiStorage.Plug with the Attachment's config function" do
@@ -239,6 +285,38 @@ defmodule Mix.Tasks.KumiStorage.InstallTest do
 
       assert content =~
                ~r/forward\(?\s*"\/uploads",\s*KumiStorage\.Plug,\s*config:\s*\{MyApp\.Core\.Attachment,\s*:__kumi_storage_config__\}/
+
+      assert Enum.any?(igniter.notices, fn n ->
+               n = IO.iodata_to_binary(n)
+
+               n =~ "mounted file serving at /uploads/:key" and
+                 n =~ "public to anyone holding the URL"
+             end)
+    end
+
+    test "the forward and the generated URL function use the same mount path" do
+      igniter =
+        test_project(app_name: :my_app, files: %{"lib/my_app_web/router.ex" => @router})
+        |> Igniter.compose_task("kumi_storage.install", [])
+
+      {_igniter, router, _zipper} = Igniter.Project.Module.find_module!(igniter, MyAppWeb.Router)
+
+      {_igniter, attachment, _zipper} =
+        Igniter.Project.Module.find_module!(igniter, MyApp.Core.Attachment)
+
+      [_, mount] =
+        Regex.run(
+          ~r/forward\(?\s*"([^"]+)",\s*KumiStorage\.Plug/,
+          Rewrite.Source.get(router, :content)
+        )
+
+      [_, url_prefix] =
+        Regex.run(
+          ~r/def __kumi_attachment_url__\(record\), do: "([^"#]*)\#\{record\.storage_key\}"/,
+          Rewrite.Source.get(attachment, :content)
+        )
+
+      assert url_prefix == mount <> "/"
     end
 
     test "running twice does not duplicate the mount" do

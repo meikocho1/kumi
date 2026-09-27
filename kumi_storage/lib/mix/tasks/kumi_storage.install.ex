@@ -21,7 +21,8 @@ defmodule Mix.Tasks.KumiStorage.Install.Docs do
          `<App>.Core`. `field :name, :image, to: <App>.Core.Attachment`
          in a `Kumi.Resource` `fields do ... end` block targets it.
       2. Adds `config :kumi_storage, backend: KumiStorage.Backend.Local,
-         root: "priv/uploads"` if not already configured.
+         root: "priv/uploads"` if not already configured, and
+         `/priv/uploads/` to `.gitignore`.
       3. Forwards a path to `KumiStorage.Plug` in your Phoenix router, if
          one is found (otherwise prints the snippet to add by hand), with
          `config: {<App>.Core.Attachment, :__kumi_storage_config__}` — the
@@ -43,6 +44,20 @@ if Code.ensure_loaded?(Igniter) do
     @moduledoc __MODULE__.Docs.long_doc()
 
     use Igniter.Mix.Task
+
+    # One literal for the router forward, the generated URL function and the
+    # notices, so they can't disagree.
+    @mount_path "/uploads"
+
+    @access_note """
+    Files there are public to anyone holding the URL: the random key is the
+    only access control, and Ash policies on the Attachment or its parent
+    don't apply to the bytes.
+    """
+
+    # Uploaded files are user data: never commit them, and never let a
+    # `COPY priv priv` or `mix release` pick up the dev ones by accident.
+    @gitignore_entry "/priv/uploads/"
 
     @impl Igniter.Mix.Task
     def info(_argv, _composing_task) do
@@ -172,9 +187,12 @@ if Code.ensure_loaded?(Igniter) do
           public? true
         end
 
+        # Private: the key is the only thing protecting the file's URL, so it
+        # stays out of public interfaces (filters, API extensions). Your own
+        # reads still load it.
         attribute :storage_key, :string do
           allow_nil? false
-          public? true
+          public? false
         end
 
         timestamps()
@@ -183,8 +201,8 @@ if Code.ensure_loaded?(Igniter) do
       @doc false
       def __kumi_attachment__, do: true
 
-      @doc "Public URL for a stored attachment — matches the `/uploads` forward this installer adds to your router."
-      def __kumi_attachment_url__(record), do: "/uploads/\#{record.storage_key}"
+      @doc "Public URL for a stored attachment — matches the `#{@mount_path}` forward this installer adds to your router."
+      def __kumi_attachment_url__(record), do: "#{@mount_path}/\#{record.storage_key}"
 
       @doc \"\"\"
       `{backend, backend_opts}` from `config :kumi_storage` — the one place
@@ -212,6 +230,33 @@ if Code.ensure_loaded?(Igniter) do
         [:root],
         "priv/uploads"
       )
+      |> ignore_uploads()
+      |> Igniter.add_notice("""
+      Kumi Storage: #{@gitignore_entry} (the default upload root) is in .gitignore.
+      A relative root resolves against the working directory, so in
+      production set an absolute one in config/runtime.exs, e.g.
+
+          config :kumi_storage, root: "/var/lib/my_app/uploads"
+      """)
+    end
+
+    defp ignore_uploads(igniter) do
+      Igniter.create_or_update_file(igniter, ".gitignore", @gitignore_entry <> "\n", fn source ->
+        Rewrite.Source.update(source, :content, fn content ->
+          ignored? =
+            content
+            |> String.split("\n")
+            |> Enum.any?(&(String.trim(&1) in [@gitignore_entry, "/priv/uploads"]))
+
+          if ignored? do
+            content
+          else
+            String.trim_trailing(content) <>
+              "\n\n# Uploaded files (kumi_storage's Local backend root).\n" <>
+              @gitignore_entry <> "\n"
+          end
+        end)
+      end)
     end
 
     defp mount_plug(igniter) do
@@ -239,9 +284,10 @@ if Code.ensure_loaded?(Igniter) do
             router: router,
             placement: :after
           )
-          |> Igniter.add_notice(
-            "Kumi Storage: mounted file serving at /uploads/:key in #{inspect(router)}."
-          )
+          |> Igniter.add_notice("""
+          Kumi Storage: mounted file serving at #{@mount_path}/:key in #{inspect(router)}.
+          #{@access_note}\
+          """)
       end
     end
 
@@ -261,7 +307,7 @@ if Code.ensure_loaded?(Igniter) do
     # __kumi_storage_config__/0 on every request; kumi_storage itself never
     # reads Application config.
     defp forward(attachment_module) do
-      "forward \"/uploads\", KumiStorage.Plug, config: {#{inspect(attachment_module)}, :__kumi_storage_config__}"
+      "forward #{inspect(@mount_path)}, KumiStorage.Plug, config: {#{inspect(attachment_module)}, :__kumi_storage_config__}"
     end
 
     defp no_router_snippet(attachment_module) do
@@ -269,6 +315,8 @@ if Code.ensure_loaded?(Igniter) do
       Kumi Storage: no Phoenix router found or selected. Mount it manually:
 
           #{forward(attachment_module)}
+
+      #{@access_note}\
       """
     end
   end

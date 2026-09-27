@@ -25,7 +25,10 @@ The installer composes `mix kumi.install` and then does three things:
    and a `__kumi_attachment_url__/1` URL function. Registered in
    `<App>.Core`.
 2. Adds `config :kumi_storage, backend: KumiStorage.Backend.Local, root:
-   "priv/uploads"` if nothing is configured yet.
+   "priv/uploads"` if nothing is configured yet, and adds
+   `/priv/uploads/` to `.gitignore` so uploaded files are never committed.
+   That root is relative to the working directory: in production, set an
+   absolute one in `config/runtime.exs`.
 3. Forwards a router path to `KumiStorage.Plug` (see
    [Backends](#backends) for its `config:` option), or prints the snippet
    if it can't find a router to edit.
@@ -117,6 +120,22 @@ dependency. Security posture:
   `Plug.Conn.send_file/3` never sees a path a client shouldn't reach.
 - Every response, success and 404, carries `x-content-type-options:
   nosniff`.
+
+### Access control
+
+`/uploads/:key` is unauthenticated. The random key in the URL is the only
+thing protecting a file: anyone holding the URL can fetch the bytes, with
+no session and no actor. Ash policies on the Attachment, or on the record
+that points at it, do not apply to the file itself.
+
+Replacing an attachment or deleting its parent record does not unpublish
+the old file; only destroying the Attachment deletes it. Don't serve
+documents that must stay private this way without putting your own plug
+or pipeline in front of the forward.
+
+The generated `storage_key` attribute is `public? false`, so the key stays
+out of public interfaces (`filter_input`, API extensions). Your own reads
+still load it, which is what `__kumi_attachment_url__/1` uses.
 
 ## Development
 

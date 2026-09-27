@@ -74,6 +74,14 @@ defmodule KumiStorage.UploadTest do
       assert File.read!(path) == "png-bytes"
     end
 
+    test "a read still loads the private storage_key, so the URL function keeps working" do
+      {:ok, attachment} = upload()
+
+      refute Ash.Resource.Info.public_attribute(Attachment, :storage_key)
+      assert [%{storage_key: key}] = Ash.read!(Attachment)
+      assert key == attachment.storage_key
+    end
+
     test "a :path source is copied and measured", %{root: root} do
       source = Path.join(System.tmp_dir!(), "upload_source_#{System.unique_integer([:positive])}")
       File.write!(source, "from disk")

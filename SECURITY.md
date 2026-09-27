@@ -50,8 +50,11 @@ If you're looking for where the interesting surface is:
   response carries `nosniff`, so an upload accepted as `image/png` is never
   served as HTML. The client filename is never used to build a path, and
   the `Plug` serves only keys that resolve inside the configured root.
-  Traversal, unrestricted type acceptance, or reading outside the
-  configured root are in scope.
+  Served files are public to anyone holding the URL: the random key is
+  the only access control, and Ash policies do not apply to the bytes.
+  That is documented behaviour, not a vulnerability; a way to guess or
+  enumerate keys is in scope, as are traversal, unrestricted type
+  acceptance, or reading outside the configured root.
 - **`kumi_admin`** deliberately has no authentication of its own — it
   consumes the host application's `on_mount` hooks and actor. Reads that
   bypass the host's Ash policies, or a rendered value escaping HTML

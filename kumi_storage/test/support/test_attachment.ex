@@ -101,7 +101,7 @@ defmodule KumiStorage.Test.Attachment do
 
     attribute :storage_key, :string do
       allow_nil? false
-      public? true
+      public? false
     end
 
     timestamps()
