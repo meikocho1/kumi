@@ -21,15 +21,16 @@ defmodule KumiAdmin.Context do
 
   @spec resolve(map(), map(), Phoenix.LiveView.Socket.t()) :: t()
   def resolve(session, params, socket) do
+    defaults = KumiAdmin.Router.__defaults__()
     app = Map.fetch!(session, "kumi_admin_app")
     mount_path = Map.fetch!(session, "kumi_admin_path")
-    sign_out_path = Map.get(session, "kumi_admin_sign_out_path", "/sign-out")
-    sign_in_path = Map.get(session, "kumi_admin_sign_in_path", "/sign-in")
-    user_resource = Map.get(session, "kumi_admin_user_resource", nil)
-    register_path = Map.get(session, "kumi_admin_register_path", "/register")
+    sign_out_path = Map.get(session, "kumi_admin_sign_out_path", defaults[:sign_out_path])
+    sign_in_path = Map.get(session, "kumi_admin_sign_in_path", defaults[:sign_in_path])
+    user_resource = Map.get(session, "kumi_admin_user_resource", defaults[:user_resource])
+    register_path = Map.get(session, "kumi_admin_register_path", defaults[:register_path])
     actor = KumiAdmin.Actor.resolve(session["kumi_admin_actor"], socket)
     resource = params["resource"] && KumiAdmin.Slug.resolve(app, params["resource"])
-    strings = Map.get(session, "kumi_admin_strings", %{})
+    strings = Map.get(session, "kumi_admin_strings", defaults[:strings])
 
     %{
       app: app,

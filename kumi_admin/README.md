@@ -69,9 +69,23 @@ policy-protected resource legitimately comes back empty — the shell
 renders that honestly ("No records visible to you.") instead of crashing,
 and New/Edit/Delete buttons are gated by `Ash.can?`.
 
-Actor handoff does not clobber your session: kumi_admin reads the full
-Plug session and adds its own two keys, so what your `on_mount` hooks
-need (e.g. `ash_authentication_phoenix`'s `user_token`) is still there.
+The actor comes from your cookie session, which kumi_admin never copies.
+It puts only its own `kumi_admin_*` keys (mount path, app, actor pair,
+sign-in/sign-out/register paths, user resource, `:strings` overrides) in
+the `live_session` session, because LiveView signs that map, unencrypted,
+into the page's `data-phx-session` token, and a bearer token like
+`ash_authentication_phoenix`'s `user_token` does not belong in page
+markup. Your `on_mount` hooks still see the cookie session through
+LiveView's own merge; on the connected mount that requires the endpoint
+line `phx.new` generates:
+
+```elixir
+socket "/live", Phoenix.LiveView.Socket,
+  websocket: [connect_info: [session: @session_options]]
+```
+
+Options are validated when the router compiles: an unknown key or an
+`:actor` that is not a `{Module, :function}` pair raises `ArgumentError`.
 
 ## Uploads
 
