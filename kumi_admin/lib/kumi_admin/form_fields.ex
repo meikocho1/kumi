@@ -8,11 +8,14 @@ defmodule KumiAdmin.FormFields do
   Field list = the intersection of the action's (already-normalized by
   Ash at compile time) `accept` list and `KumiAdmin.Attributes.visible/1`,
   kept in attribute declaration order — so a `sensitive? true` attribute
-  never reaches a form, in either direction. A `belongs_to`'s generated
-  foreign key attribute (e.g. `:account_id`) is detected via
-  `KumiAdmin.Attributes.belongs_to_by_source_attribute/1` and rendered as
-  a `:belongs_to` select instead of falling through to its raw `:uuid`
-  type.
+  is never rendered or pre-filled, and `KumiAdmin.ResourceFormLive` drops
+  any param outside this list before it reaches the action. The action's
+  `accept` list and its policies remain the write boundary.
+
+  A `belongs_to`'s generated foreign key attribute (e.g. `:account_id`)
+  is detected via `KumiAdmin.Attributes.belongs_to_by_source_attribute/1`
+  and rendered as a `:belongs_to` select instead of falling through to
+  its raw `:uuid` type.
   """
 
   @text_like_names ~r/body|description|notes?|content|comment/i

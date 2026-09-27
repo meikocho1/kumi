@@ -12,6 +12,8 @@ defmodule KumiAdmin.Test.Domain do
     resource KumiAdmin.Test.ReadOnly
     resource KumiAdmin.Test.StrictContact
     resource KumiAdmin.Test.Credential
+    resource KumiAdmin.Test.Patient
+    resource KumiAdmin.Test.Ticket
   end
 end
 
@@ -298,6 +300,48 @@ defmodule KumiAdmin.Test.Credential do
 
   relationships do
     belongs_to :account, KumiAdmin.Test.Account, public?: true
+  end
+end
+
+defmodule KumiAdmin.Test.Patient do
+  @moduledoc "Fixture Ash resource whose `:name` is `sensitive?` — a person's name is typical PII — so `KumiAdmin.Format.record_label/1` must not use it."
+
+  use Ash.Resource,
+    domain: KumiAdmin.Test.Domain,
+    data_layer: Ash.DataLayer.Ets
+
+  ets do
+    private? true
+  end
+
+  actions do
+    defaults [:read, :destroy, create: :*, update: :*]
+  end
+
+  attributes do
+    uuid_primary_key :id
+    attribute :name, :string, public?: true, sensitive?: true
+  end
+end
+
+defmodule KumiAdmin.Test.Ticket do
+  @moduledoc "Fixture Ash resource whose `:name` is private (`public?: false`), so `KumiAdmin.Format.record_label/1` must not use it."
+
+  use Ash.Resource,
+    domain: KumiAdmin.Test.Domain,
+    data_layer: Ash.DataLayer.Ets
+
+  ets do
+    private? true
+  end
+
+  actions do
+    defaults [:read]
+  end
+
+  attributes do
+    uuid_primary_key :id
+    attribute :name, :string, public?: false
   end
 end
 

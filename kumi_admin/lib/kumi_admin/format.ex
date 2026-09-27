@@ -52,11 +52,18 @@ defmodule KumiAdmin.Format do
   non-blank, else its (truncated) id. Same "name-ish field else id"
   heuristic used for `belongs_to` display on the detail page and for
   `belongs_to` select options on the form.
+
+  `:name` counts only when `KumiAdmin.Attributes.visible/1` lets the admin
+  show it: a `sensitive?` or private name is exactly the value the columns
+  and the detail grid already hide, so it must not come back as a page
+  heading or a select option either.
   """
   @spec record_label(struct()) :: String.t()
-  def record_label(record) do
-    case Map.get(record, :name) do
-      name when is_binary(name) and name != "" -> name
+  def record_label(%resource{} = record) do
+    with true <- Enum.any?(KumiAdmin.Attributes.visible(resource), &(&1.name == :name)),
+         name when is_binary(name) and name != "" <- Map.get(record, :name) do
+      name
+    else
       _ -> truncate_id(record.id)
     end
   end

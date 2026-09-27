@@ -15,7 +15,7 @@ defmodule KumiAdmin.ResourceFormLiveTest do
   import Phoenix.LiveViewTest
 
   alias KumiAdmin.{FormFields, ResourceFormLive}
-  alias KumiAdmin.Test.{Account, Attachment, Contact, Person, StrictContact}
+  alias KumiAdmin.Test.{Account, Attachment, Contact, Credential, Person, StrictContact}
 
   defmodule Domain do
     @moduledoc false
@@ -352,6 +352,56 @@ defmodule KumiAdmin.ResourceFormLiveTest do
       {:noreply, socket} = ResourceFormLive.submit(form_socket(Refusing), %{"name" => "x"}, [])
 
       assert error_flash(socket) == "Please fix the errors below."
+    end
+  end
+
+  describe "inbound params are narrowed to the rendered fields" do
+    # LiveView events are client-controlled: `create: :*` accepts
+    # `api_secret`, so anything that reached the action would be written.
+    test "save drops a sensitive attribute the page never rendered" do
+      {:noreply, _socket} =
+        ResourceFormLive.handle_event(
+          "save",
+          %{"form" => %{"label" => "a", "api_secret" => "b"}},
+          form_socket(Credential)
+        )
+
+      assert [credential] = Ash.read!(Credential)
+      assert credential.label == "a"
+      assert credential.api_secret == nil
+    end
+
+    test "save drops an upload field's foreign key posted without a picked file" do
+      {:ok, existing} =
+        ResourceFormLive.upload_attachment(Attachment, temp_file!("png"), entry(), nil)
+
+      socket = ResourceFormLive.allow_uploads(form_socket(Person))
+
+      {:noreply, _socket} =
+        ResourceFormLive.handle_event(
+          "save",
+          %{"form" => %{"name" => "Ada", "avatar_id" => existing.id}},
+          socket
+        )
+
+      assert [%{name: "Ada", avatar_id: nil}] = Ash.read!(Person)
+    end
+
+    test "validate keeps the rendered fields and their _unused_ markers, nothing else" do
+      params = %{
+        "label" => "a",
+        "_unused_label" => "",
+        "api_secret" => "b",
+        "_unused_api_secret" => ""
+      }
+
+      {:noreply, socket} =
+        ResourceFormLive.handle_event("validate", %{"form" => params}, form_socket(Credential))
+
+      assert socket.assigns.form.params["label"] == "a"
+      assert Map.has_key?(socket.assigns.form.params, "_unused_label")
+      refute Map.has_key?(socket.assigns.form.params, "api_secret")
+      refute Map.has_key?(socket.assigns.form.params, "_unused_api_secret")
     end
   end
 

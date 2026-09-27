@@ -49,6 +49,7 @@ defmodule KumiAdmin.ResourceFormLive do
   end
 
   def handle_event("validate", %{"form" => params}, socket) do
+    params = permitted_params(params, socket.assigns.fields)
     {:noreply, assign(socket, form: AshPhoenix.Form.validate(socket.assigns.form, params))}
   end
 
@@ -62,10 +63,33 @@ defmodule KumiAdmin.ResourceFormLive do
   end
 
   def handle_event("save", %{"form" => params}, socket) do
+    params = permitted_params(params, socket.assigns.fields)
+
     case apply_uploads(socket, params) do
       {:ok, params, created} -> submit(socket, params, created)
       {:error, key} -> {:noreply, put_flash(socket, :error, t(socket, key))}
     end
+  end
+
+  # Event params are whatever the client sends, not what the page
+  # rendered: keep only the fields this form shows (plus LiveView's
+  # `"_unused_" <> name` used-input markers for them). A `sensitive?` or
+  # private attribute the action happens to accept, an argument the admin
+  # never renders, and an upload field's foreign key — which only
+  # `apply_uploads/2` may set, after the `:upload` action validated the
+  # file — are all dropped here. The action's `accept` list and policies
+  # remain the write boundary; this only stops the admin forwarding more
+  # than it asked for.
+  defp permitted_params(params, fields) do
+    names =
+      for %{attribute: attribute, widget: widget} <- fields,
+          not match?({:upload, _}, widget),
+          do: Atom.to_string(attribute.name)
+
+    Map.filter(params, fn
+      {"_unused_" <> name, _value} -> name in names
+      {name, _value} -> name in names
+    end)
   end
 
   # The half of "save" after the uploads were consumed, split out so it is

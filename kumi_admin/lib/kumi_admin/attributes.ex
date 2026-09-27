@@ -11,12 +11,14 @@ defmodule KumiAdmin.Attributes do
   @doc """
   Public attributes minus the ones Ash marks `sensitive? true`.
 
-  Every attribute list in kumi_admin (columns, detail page, search,
-  forms) goes through here, so a `sensitive?` attribute is never
-  rendered, never searched and never posted back. Consequence worth
-  knowing: a *required* sensitive attribute can't be filled in from the
-  admin at all — set it from the host application's own UI or from
-  `iex`.
+  Every attribute list in kumi_admin (columns, detail page, record
+  labels, search, forms) goes through here, so a `sensitive?` attribute
+  is never rendered, never pre-filled and never searched, and the form
+  drops it from whatever the browser posts back. That is the admin
+  narrowing its own UI, not authorization: the action's `accept` list and
+  its policies remain the write boundary. Consequence worth knowing: a
+  *required* sensitive attribute can't be filled in from the admin at
+  all — set it from the host application's own UI or from `iex`.
   """
   @spec visible(module()) :: [Ash.Resource.Attribute.t()]
   def visible(resource) do
