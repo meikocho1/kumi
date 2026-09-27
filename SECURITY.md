@@ -32,11 +32,14 @@ public disclosure, and tell us if you have a disclosure deadline.
 If you're looking for where the interesting surface is:
 
 - **`mix kumi.apply`** executes DDL against a live database. It is
-  restricted to changes classified SAFE, gated by an explicit allowlist,
-  runs in a single transaction, and re-introspects afterwards to verify
-  the result. It also refuses to run outside `MIX_ENV=dev`. Any path that
-  gets a destructive statement past those gates is a vulnerability, not a
-  bug report.
+  restricted to changes classified SAFE, gated by an explicit allowlist of
+  operation shapes, executes only statements that carry the whole change
+  (no column type modifiers or index options dropped), runs in a single
+  transaction, and re-introspects afterwards to verify the result. It
+  also refuses to run outside `MIX_ENV=dev`, and while a migration is
+  pending or `mix ash.codegen --check` fails. Any path that gets a
+  destructive statement past those gates is a vulnerability, not a bug
+  report.
 - **`Kumi.Plan.Safety`** must fail closed: an unrecognised type change is
   classified DANGEROUS rather than assumed harmless. A case where it
   fails *open* is a security issue.

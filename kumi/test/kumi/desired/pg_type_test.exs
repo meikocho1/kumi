@@ -136,6 +136,47 @@ defmodule Kumi.Desired.PgTypeTest do
     end
   end
 
+  describe "exact_type?/2 (may Kumi.Apply run ADD COLUMN with from_ash/2's name?)" do
+    defmodule MigrationTypeAs do
+      @moduledoc false
+      # A custom type whose migration type is whatever `as:` says, for the
+      # shapes no builtin Ash type produces.
+      def migration_type(constraints), do: Keyword.fetch!(constraints, :as)
+    end
+
+    test "a plain migration type is exact" do
+      assert PgType.exact_type?(Ash.Type.UUID, [])
+      assert PgType.exact_type?(Ash.Type.String, [])
+      assert PgType.exact_type?(Ash.Type.Float, [])
+      assert PgType.exact_type?({:array, Ash.Type.String}, [])
+      assert PgType.exact_type?(Ash.Type.Vector, [])
+    end
+
+    test "an unconstrained decimal is exact; one with precision or scale is not" do
+      assert PgType.exact_type?(Ash.Type.Decimal, [])
+      assert PgType.exact_type?(Ash.Type.Decimal, precision: :arbitrary, scale: :arbitrary)
+      refute PgType.exact_type?(Ash.Type.Decimal, precision: 10, scale: 2)
+      refute PgType.exact_type?(Ash.Type.Decimal, precision: 10)
+    end
+
+    test "a vector with dimensions is not exact" do
+      refute PgType.exact_type?(Ash.Type.Vector, dimensions: 1536)
+    end
+
+    # Ecto writes :string as varchar(255); :serial, :bigserial and
+    # :identity bring a sequence and NOT NULL with them.
+    test "a migration type Ecto expands in DDL, or an unrecognised one, is not exact" do
+      assert PgType.exact_type?(MigrationTypeAs, as: :text)
+
+      for expanded <- [:string, :serial, :bigserial, :identity, {:varchar, 20}] do
+        refute PgType.exact_type?(MigrationTypeAs, as: expanded), inspect(expanded)
+      end
+
+      refute PgType.exact_type?({:array, MigrationTypeAs}, as: :string)
+      refute PgType.exact_type?(WeirdAshType, [])
+    end
+  end
+
   describe "the inspect/1 last-resort fallback IS reachable (L1)" do
     test "a custom type's non-atom, non-tuple migration_type/1 reaches inspect/1" do
       assert PgType.from_ash(WeirdAshType, []) == "%{weird: true}"

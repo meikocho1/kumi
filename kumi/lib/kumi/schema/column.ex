@@ -33,10 +33,16 @@ defmodule Kumi.Schema.Column do
   dominate it.
   See `Kumi.Desired.PgType.precision_from_ash/2` and v0.1.5 friction log
   (F18, F33-35).
+
+  `exact_type?` says whether `type` is the whole column type or only its
+  name: `numeric(10,2)`, `vector(1536)` and `varchar(255)` are all compared
+  by their `udt_name` alone, so `ADD COLUMN ... numeric` would create a
+  different column than `mix ash.codegen` did. `Kumi.Desired` sets it;
+  `Kumi.Diff` never reads it, and only `Kumi.Apply` acts on it.
   """
 
   @enforce_keys [:name, :type, :nullable]
-  defstruct [:name, :type, :nullable, default: nil, datetime_precision: nil]
+  defstruct [:name, :type, :nullable, default: nil, datetime_precision: nil, exact_type?: true]
 
   @type default :: nil | {:literal, String.t()} | :generated
 
@@ -45,6 +51,7 @@ defmodule Kumi.Schema.Column do
           type: String.t(),
           nullable: boolean(),
           default: default(),
-          datetime_precision: non_neg_integer() | nil
+          datetime_precision: non_neg_integer() | nil,
+          exact_type?: boolean()
         }
 end

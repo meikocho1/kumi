@@ -72,6 +72,34 @@ defmodule Kumi.Desired.PgType do
     end
   end
 
+  @doc """
+  Whether `from_ash/2`'s name is the whole column type: whether
+  `ADD COLUMN c <name>` creates the same column Ecto builds from the
+  migration type AshPostgres generates.
+
+  False for every parameterized migration type (`{:decimal, 10, 2}`,
+  `{:vector, 1536}`, `{:varchar, 20}`): the name drops the arguments. An
+  unconstrained decimal is `{:decimal, nil, nil}` (AshPostgres already
+  turns `:arbitrary` into `nil`) and stays exact. Also false for the
+  atoms Ecto expands in DDL — `:string` becomes `varchar(255)`, and
+  `:serial`, `:bigserial` and `:identity` bring a sequence with them —
+  and for anything unrecognised, so an unmapped shape fails closed.
+  Datetime precision is carried and checked separately, see
+  `precision_from_ash/2`.
+  """
+  @spec exact_type?(module(), keyword()) :: boolean()
+  def exact_type?(type, constraints) do
+    type
+    |> AshPostgres.MigrationGenerator.get_migration_type(constraints)
+    |> exact?()
+  end
+
+  defp exact?(atom) when atom in [:string, :serial, :bigserial, :identity], do: false
+  defp exact?(atom) when is_atom(atom), do: true
+  defp exact?({:array, inner}), do: exact?(inner)
+  defp exact?({:decimal, nil, nil}), do: true
+  defp exact?(_parameterized_or_unknown), do: false
+
   # Every Ecto migration type whose udt_name is not the atom's own name.
   # An atom missing from here falls back to its name, which is right for
   # `:text`, `:uuid`, `:date`, `:citext`, `:vector`, ... and fails closed

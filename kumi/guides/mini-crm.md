@@ -355,7 +355,10 @@ No changes. Database matches application definition.
 
 `kumi.apply` only ever runs operations classified `:safe`, on an explicit
 allowlist, that render to exact SQL — `:review` and `:dangerous` operations
-are printed with a reason and never executed, under any flag.
+are printed with a reason and never executed, under any flag. It also
+refuses to start while a migration is pending or `mix ash.codegen --check`
+would still generate something: if the code is ahead of the snapshot,
+that column is codegen's to add, not Kumi's.
 
 ## Step 7 — An avatar field, via `kumi_storage`
 

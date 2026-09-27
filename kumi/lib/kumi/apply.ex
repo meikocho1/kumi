@@ -6,39 +6,45 @@ defmodule Kumi.Apply do
   forward when code is ahead of the snapshot; this repairs the DB when it
   has drifted BEHIND what code+snapshot already agree on).
 
-  Three gates, ALL required, decide what actually runs — derived from
+  Four gates, ALL required, decide what actually runs — derived from
   `Kumi.Plan.Safety`'s actual `:safe` clauses, read in full before writing
   this module:
 
-    1. `Kumi.Plan.Safety` classified the op `:safe`.
-    2. The op's tag is on the explicit allowlist below — `:add_table`,
-       `:add_column`, `:add_index`, `:change_column` are the only tags
-       `Safety.classify/1` ever assigns `:safe` to (a nullable
-       `add_column`; a non-unique `add_index`; a `change_column` whose
-       every individual change — NULL-relax and/or default — is itself
-       safe; `add_table` unconditionally). This is a second, independent
-       check so a future change to `Safety` can't silently widen what
-       gets executed here.
-    3. It fully renders — `Kumi.Plan.SQL.render/1` returns `{:ok, sql}`,
-       AND (a check `SQL.render/1` itself can't make, since it doesn't
-       know this is destined for execution) a `:safe` `add_column` whose
-       `default` or `datetime_precision` is non-nil is skipped even
-       though `SQL.render/1` happily renders `ADD COLUMN name type` for
-       it: `Safety.classify/1` only looks at `nullable`, not `default`,
-       so a nullable column WITH a default is still classified `:safe` —
-       but `ADD COLUMN` carries no default, so running it would leave the
-       column back with a residual `change_column` (`:default` unset),
-       i.e. a partial repair. (Fail-closed here also skips one case that
-       would actually round-trip fine — a nullable `utc_datetime_usec`,
-       precision 6, matches Postgres's own default precision for a new
-       timestamp column — but telling that apart from a mismatching case
-       isn't worth the special-casing.) `add_table` (no `CREATE TABLE`
-       reconstruction) and a `change_column` carrying a default change
-       (no SQL form; `SQL.render/1`'s all-or-nothing rule also rejects
-       one mixed with an otherwise renderable change, since partially
-       applying a `:safe`-classified op would leave the rest of its
-       drift silently unrepaired) are the other ways this gate closes —
-       renderable-and-complete is a strictly narrower set than safe.
+    1. The plan entry says `:safe`. This reads the level stored in the
+       entry rather than recomputing it: `Kumi.Plan.build/1` is the only
+       thing that builds plan entries, and it takes the level from
+       `Kumi.Plan.Safety`.
+    2. The op's SHAPE is on the explicit allowlist below — not just its
+       tag: a nullable `add_column`, a non-unique `add_index`, or a
+       `change_column` whose every change is a NULL-relax
+       (`{:nullable, true, false}`). Nothing else, whatever level the
+       entry carries. This is a second, independent check so a change to
+       `Safety` (or a hand-built entry passed to `run/3`) can't silently
+       widen what gets executed here — a tag-level list let any
+       renderable `change_column`, `ALTER COLUMN ... TYPE` included,
+       through. `add_table` (no `CREATE TABLE` reconstruction) and a
+       `change_column` carrying a default change (no SQL form) are safe
+       but never executable, so they stop here.
+    3. It renders — `Kumi.Plan.SQL.render/1` returns `{:ok, sql}`.
+    4. The rendered statement is complete: it carries everything the op
+       describes, which `SQL.render/1` itself can't promise, since it
+       doesn't know this is destined for execution. `ADD COLUMN name type`
+       sets no default and no datetime precision, and names the column
+       type by its `udt_name` alone, so a `:safe` `add_column` is skipped
+       when its `default` or `datetime_precision` is non-nil or its type
+       is not `exact_type?` (`numeric(10,2)`, `vector(1536)`, ...).
+       `Safety.classify/1` only looks at `nullable`, so each of those is
+       still `:safe`, and running it would leave residual drift (the
+       default) or, worse, a different column than `mix ash.codegen`
+       built that no later plan can see (the type). Likewise
+       `CREATE INDEX name ON table (columns)` is only run for an `exact?`
+       index — one with no `where`, `using`, `include`, expression field
+       or other option `Kumi.Schema.Index` can't carry. (Fail-closed here
+       also skips one case that would actually round-trip fine — a
+       nullable `utc_datetime_usec`, precision 6, matches Postgres's own
+       default precision for a new timestamp column — but telling that
+       apart from a mismatching case isn't worth the special-casing.)
+       Renderable-and-complete is a strictly narrower set than safe.
 
   `:review` and `:dangerous` ops are ALWAYS skipped, with a reason, under
   any option — there is no flag that runs them.
@@ -58,8 +64,7 @@ defmodule Kumi.Apply do
 
   alias Kumi.{Actual, Desired, Diff, Plan}
   alias Kumi.Plan.SQL
-
-  @safe_op_tags [:add_table, :add_column, :add_index, :change_column]
+  alias Kumi.Schema.{Column, Index}
 
   @type executed_entry :: {term(), String.t()}
   @type skipped_entry :: {term(), String.t()}
@@ -88,7 +93,7 @@ defmodule Kumi.Apply do
   end
 
   @doc """
-  Applies the same three gates `run/3` uses, without executing anything —
+  Applies the same four gates `run/3` uses, without executing anything —
   `Mix.Tasks.Kumi.Apply` calls this to print its preview so the printed
   "will run" / "skip" lines can never drift from what `run/3` actually does.
   """
@@ -100,11 +105,13 @@ defmodule Kumi.Apply do
           level != :safe ->
             {exec, [{op, "not :safe (#{level}): #{reason}"} | skip]}
 
-          elem(op, 0) not in @safe_op_tags ->
+          not executable_shape?(op) ->
             {exec,
              [
                {op,
-                "classified :safe but op tag #{elem(op, 0)} is not on the executable allowlist"}
+                "classified :safe but this #{elem(op, 0)} is not on the executable allowlist " <>
+                  "(a nullable add_column, a non-unique add_index, or a change_column " <>
+                  "that only drops NOT NULL)"}
                | skip
              ]}
 
@@ -119,11 +126,22 @@ defmodule Kumi.Apply do
     {Enum.reverse(exec), Enum.reverse(skip)}
   end
 
-  # ADD COLUMN carries no default/precision, so a nullable add_column WITH
-  # one would come back missing it — Safety.classify/1 only looks at
-  # `nullable`, so it still says :safe here; this catches what that check
-  # can't. SQL.render/1 stays untouched (renderable != executable is its
-  # own contract — FixHint still shows this SQL to a human).
+  # Gate 2. Matches the op's shape, not its tag, and never consults the
+  # level: a :safe label on anything else changes nothing here.
+  defp executable_shape?({:add_column, _table, %Column{nullable: true}}), do: true
+  defp executable_shape?({:add_index, _table, %Index{unique: false}}), do: true
+
+  defp executable_shape?({:change_column, _table, _col, [_ | _] = changes}),
+    do: Enum.all?(changes, &match?({:nullable, true, false}, &1))
+
+  defp executable_shape?(_op), do: false
+
+  # Gates 3 and 4. ADD COLUMN carries no default/precision and names the
+  # type by its udt_name alone, and CREATE INDEX here carries only a column
+  # list — Safety.classify/1 looks at none of that, so it still says :safe;
+  # this catches what that check can't. SQL.render/1 stays untouched
+  # (renderable != executable is its own contract — FixHint still shows
+  # this SQL to a human).
   defp render_for_execution({:add_column, _table, %{default: default}} = op)
        when not is_nil(default) do
     {:unsupported,
@@ -138,14 +156,23 @@ defmodule Kumi.Apply do
        "ADD COLUMN can't guarantee it, so running this could leave a residual precision mismatch"}
   end
 
+  defp render_for_execution({:add_column, _table, %{exact_type?: false}} = op) do
+    {:unsupported,
+     "classified :safe but adds column #{elem(op, 2).name} whose type carries modifiers " <>
+       "(precision/scale/length/dimensions) — ADD COLUMN #{elem(op, 2).type} would drop them " <>
+       "and create a different column than mix ash.codegen does"}
+  end
+
+  defp render_for_execution({:add_index, _table, %{exact?: false}} = op) do
+    {:unsupported,
+     "classified :safe but index #{elem(op, 2).name} carries where/using/include/expression " <>
+       "options — CREATE INDEX over its columns alone would build a different index"}
+  end
+
   defp render_for_execution(op) do
     case SQL.render(op) do
-      {:ok, sql} ->
-        {:ok, sql}
-
-      :unsupported ->
-        {:unsupported,
-         "classified :safe but not renderable to SQL (e.g. add_table, or a change_column with a default/precision change)"}
+      {:ok, sql} -> {:ok, sql}
+      :unsupported -> {:unsupported, "classified :safe but Kumi.Plan.SQL has no statement for it"}
     end
   end
 
@@ -158,6 +185,10 @@ defmodule Kumi.Apply do
     to_execute
   end
 
+  # The raw diff, without `Kumi.Plan.Rename`, on purpose: this only asks
+  # whether an executed op is still there, and Rename could rewrite a
+  # still-missing column's `add_column` into a `possible_rename` that the
+  # `op in new_ops` check below would not recognise.
   defp verify!(repo, domains, executed) do
     new_ops =
       domains
@@ -169,7 +200,7 @@ defmodule Kumi.Apply do
 
   # Split out from verify!/3 so the raise path is unit-testable without a
   # real database: exercising it for real would require an executed op
-  # that Safety/SQL.render's own gates (the three gates this module's
+  # that Safety/SQL.render's own gates (the four gates this module's
   # moduledoc lists in full) already prevent from both running AND leaving
   # residual drift — by design, there's no genuine drift scenario left
   # that reaches this check and still fails it.
