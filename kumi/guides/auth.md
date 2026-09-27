@@ -171,6 +171,43 @@ kumi_admin "/admin",
   on_mount: [{MyAppWeb.LiveUserAuth, :current_user}]
 ```
 
+The flip side: kumi_admin only checks that there *is* an actor. Every
+account your authentication accepts — including anyone who registers
+themselves at `/register` — gets full admin access, because resources
+without Ash policies let any actor read and write everything, and a
+`Kumi.Resource` shorthand never has policies (it doesn't add
+`Ash.Policy.Authorizer`). On a fresh deploy with zero users, the first
+visitor to the admin is sent to `/register`, so create your own account
+before the app is reachable. Then narrow it, either way:
+
+- Set `registration_enabled? false` on the password strategy once the
+  first user exists, so nobody else can sign themselves up.
+- Pass `kumi_admin/2` an `actor:` that returns `nil` for anyone who
+  isn't an admin. `KumiAdmin.Gate` redirects an actor-less visit, so
+  they never see the shell:
+
+  ```elixir
+  kumi_admin "/admin",
+    app: MyApp.App,
+    on_mount: [{MyAppWeb.LiveUserAuth, :current_user}],
+    actor: {MyAppWeb.AdminActor, :fetch}
+  ```
+
+  ```elixir
+  defmodule MyAppWeb.AdminActor do
+    # `admin?` is an attribute you add to your user resource.
+    def fetch(socket) do
+      case socket.assigns[:current_user] do
+        %{admin?: true} = user -> user
+        _ -> nil
+      end
+    end
+  end
+  ```
+
+For anything finer than admin-or-not, write the resource in plain Ash
+with policies; kumi_admin respects them.
+
 ## Two-factor authentication
 
 **Be clear-eyed here: `ash_authentication` has no TOTP or 2FA strategy.**
@@ -190,9 +227,43 @@ already enforced by the organisation's own policy. Your app sees an
 authenticated identity; enrolment, recovery codes, hardware keys, "trust
 this device", and the compliance paperwork all stay upstream.
 
-For an internal or B2B admin this is the whole answer — configure OIDC (or
-Google/Auth0 above), turn MFA on in the provider's console, and stop.
-Zero security-critical code in your repo.
+That settles *how* people sign in, not *who* may. The generated
+`register_with_google` and `register_with_oidc` admit any account the
+provider authenticates. With `google` that is every Google account, not
+only your Workspace's, and turning MFA on in your admin console does
+nothing about an outside gmail.com account. Google's `hd` authorize
+parameter doesn't change that — it only filters the account chooser, and
+Google says not to rely on it. To keep sign-in to your organisation:
+
+- set the Google Cloud OAuth consent screen's user type to **Internal**,
+  so only your Workspace's accounts can complete the flow; or
+- check the hosted-domain claim in `register_with_google`, next to the
+  verified-email guard:
+
+  ```elixir
+  change fn changeset, _ctx ->
+    case Ash.Changeset.get_argument(changeset, :user_info) do
+      %{"hd" => "example.com"} ->
+        changeset
+
+      _ ->
+        Ash.Changeset.add_error(changeset,
+          field: :user_info,
+          message: "not an example.com account"
+        )
+    end
+  end
+  ```
+
+  The key depends on your Assent version, the library underneath
+  `ash_authentication`'s OAuth2 strategies: `"hd"` with Assent 0.3,
+  `"google_hd"` with Assent 0.2. For an OIDC provider with no such
+  claim, check the domain of the (verified) `"email"` instead.
+
+Then, for an internal or B2B admin, this is the whole answer — configure
+OIDC (or Google/Auth0 above), restrict who can sign in, turn MFA on in
+the provider's console, and stop. Zero security-critical code in your
+repo.
 
 ### Build a TOTP second factor yourself
 

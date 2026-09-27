@@ -67,7 +67,11 @@ right after resolving the session; an actor-less visit redirects rather
 than rendering. With an actor but restrictive policies, a
 policy-protected resource legitimately comes back empty — the shell
 renders that honestly ("No records visible to you.") instead of crashing,
-and New/Edit/Delete buttons are gated by `Ash.can?`.
+and New/Edit/Delete buttons are gated by `Ash.can?`. The converse bites
+harder: without policies — and a `Kumi.Resource` shorthand has none —
+every account your authentication accepts can read and write everything.
+[`kumi/guides/auth.md`](../kumi/guides/auth.md) shows the two ways to
+narrow that.
 
 The actor comes from your cookie session, which kumi_admin never copies.
 It puts only its own `kumi_admin_*` keys (mount path, app, actor pair,

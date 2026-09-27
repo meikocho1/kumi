@@ -71,7 +71,14 @@ defmodule Mix.Tasks.Kumi.Gen.Auth.Docs do
     There is no TOTP strategy in `ash_authentication`, and Kumi does not
     add one. Generating `oidc` (or `google` against a Workspace domain)
     is the supported path to MFA: enrolment, recovery codes and hardware
-    keys stay with the identity provider. See `guides/auth.md`.
+    keys stay with the identity provider.
+
+    That decides how people sign in, not who may. The generated action
+    admits any account the provider authenticates — for `google`, any
+    Google account, not only your Workspace's. Google's `hd` authorize
+    parameter is a UI hint and restricts nothing; set the OAuth consent
+    screen to Internal, or check the hosted-domain claim in
+    `register_with_google`. See `guides/auth.md`.
     """
   end
 end

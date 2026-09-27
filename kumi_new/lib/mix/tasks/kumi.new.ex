@@ -283,25 +283,37 @@ defmodule Mix.Tasks.Kumi.New do
   end
 
   defp print_next_steps(args) do
-    steps =
-      [
-        "Add your Ash resources under `resources do ... end` in lib/#{args.app_name}/app.ex\n     (use `Kumi.Resource` shorthand, then `mix kumi.expand` / `mix ash.codegen`).",
-        "mix phx.server",
-        if(args.admin?, do: "Register a user at /register, then visit /kumi-admin"),
-        "mix kumi.plan / mix kumi.report — inspect and verify your app."
-      ]
-      |> Enum.reject(&is_nil/1)
-      |> Enum.with_index(1)
-      |> Enum.map_join("\n", fn {step, i} -> "  #{i}. #{step}" end)
-
     Mix.shell().info("""
 
     ==> #{args.app_name} is ready.
 
     Next steps:
       cd #{args.app_name}
-    #{steps}
+    #{next_steps(args)}
     """)
+  end
+
+  @doc false
+  # Public so the wording can be tested without generating a project.
+  def next_steps(args) do
+    web_module = "#{Macro.camelize(args.app_name)}Web"
+
+    [
+      "Add your Ash resources under `resources do ... end` in lib/#{args.app_name}/app.ex\n     (use `Kumi.Resource` shorthand, then `mix kumi.expand` / `mix ash.codegen`).",
+      "mix phx.server",
+      if(args.admin?,
+        do:
+          "Register a user at /register, then visit /kumi-admin.\n" <>
+            "     Every account your sign-in accepts is a full admin there: once your own account\n" <>
+            "     exists, set `registration_enabled? false` on the password strategy, or pass\n" <>
+            "     kumi_admin `actor: {#{web_module}.AdminActor, :fetch}` returning nil for\n" <>
+            "     non-admins (kumi/guides/auth.md)."
+      ),
+      "mix kumi.plan / mix kumi.report — inspect and verify your app."
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.with_index(1)
+    |> Enum.map_join("\n", fn {step, i} -> "  #{i}. #{step}" end)
   end
 
   defp stream_cmd(cmd, args, opts \\ []) do
