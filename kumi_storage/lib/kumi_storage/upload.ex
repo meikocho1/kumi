@@ -11,10 +11,16 @@ defmodule KumiStorage.Upload do
   never read Application config.
 
   The size is measured from the source itself; a size the caller declares
-  is never trusted. The content type is still the caller's claim: the
-  backend derives the stored extension from it and `KumiStorage.Plug`
-  serves with `nosniff`, so a mislabelled file is served as the allowed
-  type it was labelled with, never as HTML.
+  is never trusted. A `{:path, path}` is measured with `File.stat/1` when
+  the changeset is built and copied when the action runs, so it must name
+  a regular file that stays unchanged in between, as a `Plug.Upload` or
+  LiveView temp file does. The path itself is trusted: the copy reads
+  whatever file it names, so never build one from request input.
+
+  The content type is still the caller's claim: the backend derives the
+  stored extension from it and `KumiStorage.Plug` serves with `nosniff`,
+  so a mislabelled file is served as the allowed type it was labelled
+  with, never as HTML.
   """
 
   require Logger
@@ -24,11 +30,17 @@ defmodule KumiStorage.Upload do
   @doc """
   The size of an upload source in bytes: `File.stat/1` for `{:path, path}`,
   `byte_size/1` for `{:binary, data}`. Any other shape is
-  `{:error, :invalid_source}`.
+  `{:error, :invalid_source}`, and so is a path that isn't a regular file:
+  a device, FIFO or directory reports a size that says nothing about what
+  a copy would read (`/dev/zero` is 0 bytes).
   """
   @spec measure(term()) :: {:ok, non_neg_integer()} | {:error, :invalid_source | File.posix()}
   def measure({:path, path}) when is_binary(path) do
-    with {:ok, %File.Stat{size: size}} <- File.stat(path), do: {:ok, size}
+    case File.stat(path) do
+      {:ok, %File.Stat{type: :regular, size: size}} -> {:ok, size}
+      {:ok, %File.Stat{}} -> {:error, :invalid_source}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   def measure({:binary, data}) when is_binary(data), do: {:ok, byte_size(data)}
@@ -83,7 +95,7 @@ defmodule KumiStorage.Upload do
       {:error, :invalid_source} ->
         Ash.Changeset.add_error(changeset,
           field: :source,
-          message: "must be {:path, path} or {:binary, data}"
+          message: "must be {:path, path} of a regular file, or {:binary, data}"
         )
 
       {:error, :too_large} ->

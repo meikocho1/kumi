@@ -9,6 +9,8 @@ defmodule KumiStorage.UploadTest do
   alias KumiStorage.Test.{Attachment, FlakyBackend}
   alias KumiStorage.Upload
 
+  @invalid_source "must be {:path, path} of a regular file, or {:binary, data}"
+
   setup do
     root =
       Path.join(
@@ -53,6 +55,19 @@ defmodule KumiStorage.UploadTest do
 
       assert Upload.measure({:path, path}) == {:ok, 42}
       assert Upload.measure({:path, Path.join(root, "missing")}) == {:error, :enoent}
+    end
+
+    test "a path that isn't a regular file is an invalid source", %{root: root} do
+      File.mkdir_p!(root)
+
+      assert Upload.measure({:path, root}) == {:error, :invalid_source}
+    end
+
+    # File.stat/1 says /dev/zero is 0 bytes; a copy of it never ends.
+    if File.exists?("/dev/zero") do
+      test "a device is an invalid source, whatever size it reports" do
+        assert Upload.measure({:path, "/dev/zero"}) == {:error, :invalid_source}
+      end
     end
 
     test "any other shape is an invalid source" do
@@ -121,8 +136,17 @@ defmodule KumiStorage.UploadTest do
     test "a :source of the wrong shape is a changeset error, not a crash", %{root: root} do
       assert {:error, error} = upload(%{source: "/etc/passwd"})
 
-      assert field_error?(error, :source, "must be {:path, path} or {:binary, data}")
+      assert field_error?(error, :source, @invalid_source)
       assert stored_files(root) == []
+    end
+
+    test "a :path that isn't a regular file is a :source error, and nothing is copied",
+         %{root: root} do
+      assert {:error, error} = upload(%{source: {:path, System.tmp_dir!()}})
+
+      assert field_error?(error, :source, @invalid_source)
+      # store/4 creates the root; it never ran.
+      refute File.dir?(root)
     end
 
     test "building the changeset stores nothing (a form validate, Ash.can?)", %{root: root} do

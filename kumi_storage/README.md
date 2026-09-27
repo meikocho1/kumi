@@ -65,8 +65,14 @@ the backend is called — backends do not validate.
 The generated `:upload` action gets there through
 `KumiStorage.Upload.prepare/3`, which:
 
-- measures the size from the bytes themselves. A `:byte_size` the caller
-  declares is ignored, so a false one can't get past the cap or be saved.
+- measures the size itself: `byte_size/1` of a `{:binary, data}`, or
+  `File.stat/1` of a `{:path, path}` when the changeset is built. A
+  `:byte_size` the caller declares is ignored, so a false one can't get
+  past the cap or be saved. A path must name a regular file that doesn't
+  change before the action runs, as a `Plug.Upload` or LiveView temp file
+  does; a device, FIFO or directory is rejected. The path is trusted
+  input, since the copy reads whatever file it names: never build one
+  from request params.
 - calls the backend's `store/4` only once the action runs, inside the
   transaction, after the policies Ash can check up front. Building the
   changeset (a form validate, `Ash.can?/3`) stores nothing, and a caller

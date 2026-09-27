@@ -43,10 +43,11 @@ If you're looking for where the interesting surface is:
 - **`Kumi.Plan.Safety`** must fail closed: an unrecognised type change is
   classified DANGEROUS rather than assumed harmless. A case where it
   fails *open* is a security issue.
-- **`kumi_storage`**'s upload path measures the size from the actual
-  bytes and checks it and the content type before anything is stored, and
-  stores only once the action runs, after the policies Ash can check up
-  front. A filter policy Ash checks against the inserted row runs after
+- **`kumi_storage`**'s upload path measures the size itself (the bytes of
+  a binary, `File.stat/1` of a regular file; any other kind of path is
+  rejected) and checks it and the content type before anything is stored,
+  and stores only once the action runs, after the policies Ash can check
+  up front. A filter policy Ash checks against the inserted row runs after
   the store, and a create it rejects is rolled back and its file deleted.
   The content type is the caller's claim: the stored extension is derived
   from it and every response carries `nosniff`, so an upload accepted as
