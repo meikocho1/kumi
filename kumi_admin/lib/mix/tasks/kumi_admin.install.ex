@@ -195,10 +195,15 @@ if Code.ensure_loaded?(Igniter) do
       Every account your authentication accepts gets full /kumi-admin
       access: resources without Ash policies (every Kumi.Resource
       shorthand) let any actor read and write everything. To narrow it,
-      set `registration_enabled? false` on the password strategy once the
-      first user exists, or pass `actor: {#{inspect(admin_actor)}, :fetch}` to
-      kumi_admin — a function of the socket returning nil for non-admins,
-      whom KumiAdmin.Gate then redirects.
+      pass `actor: {#{inspect(admin_actor)}, :fetch}` to kumi_admin — a
+      function of the socket returning nil for non-admins, whom
+      KumiAdmin.Gate then redirects — which works whatever the sign-in.
+      Or, once the first user exists, close every strategy that can
+      register users: `registration_enabled? false` on password, and on
+      magic_link too (then also delete its generated
+      `create :sign_in_with_magic_link`). OAuth providers register anyone
+      the provider authenticates; kumi/guides/auth.md shows how to
+      restrict them.
       """)
     end
 

@@ -180,11 +180,25 @@ without Ash policies let any actor read and write everything, and a
 visitor to the admin is sent to `/register`, so create your own account
 before the app is reachable. Then narrow it, either way:
 
-- Set `registration_enabled? false` on the password strategy once the
-  first user exists, so nobody else can sign themselves up.
+- Once the first user exists, close every strategy that can register
+  users. Closing one leaves the others open:
+  - **password:** set `registration_enabled? false`.
+  - **magic_link:** set `registration_enabled? false`, and delete the
+    generated `create :sign_in_with_magic_link` action. With
+    registration off, `ash_authentication` signs in through a *read*
+    action of that name, and builds one itself only when none is
+    defined; keep the create and every magic-link sign-in fails.
+  - **google, github, oidc:** the generated `register_with_<provider>`
+    admits any account the provider authenticates. Here
+    `registration_enabled? false` alone doesn't compile, since the
+    strategy then wants a hand-written `sign_in_with_<provider>` read
+    action. For Google and OIDC, restrict it at the provider or check
+    the claim instead (see
+    [Delegate MFA](#delegate-mfa-to-the-identity-provider-recommended)
+    below); for GitHub, use the `actor:` gate.
 - Pass `kumi_admin/2` an `actor:` that returns `nil` for anyone who
-  isn't an admin. `KumiAdmin.Gate` redirects an actor-less visit, so
-  they never see the shell:
+  isn't an admin. This works whatever the strategies. `KumiAdmin.Gate`
+  redirects an actor-less visit, so they never see the shell:
 
   ```elixir
   kumi_admin "/admin",

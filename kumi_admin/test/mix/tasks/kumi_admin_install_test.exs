@@ -132,6 +132,12 @@ defmodule Mix.Tasks.KumiAdmin.InstallTest do
     assert notice =~ "Every account your authentication accepts gets full /kumi-admin"
     assert notice =~ "registration_enabled? false"
     assert notice =~ "actor: {MyAppWeb.AdminActor, :fetch}"
+    # The installer can't see which strategies the host uses, and closing
+    # password alone leaves magic links and OAuth creating accounts.
+    notice = String.replace(notice, ~r/\s+/, " ")
+    assert notice =~ "every strategy that can register users"
+    assert notice =~ "`create :sign_in_with_magic_link`"
+    assert notice =~ "OAuth providers register anyone the provider authenticates"
   end
 
   test "router + LiveUserAuth + Accounts.User: mount includes user_resource and register_path" do

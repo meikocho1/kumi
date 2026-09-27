@@ -296,25 +296,64 @@ defmodule Mix.Tasks.Kumi.New do
   @doc false
   # Public so the wording can be tested without generating a project.
   def next_steps(args) do
-    web_module = "#{Macro.camelize(args.app_name)}Web"
-
     [
       "Add your Ash resources under `resources do ... end` in lib/#{args.app_name}/app.ex\n     (use `Kumi.Resource` shorthand, then `mix kumi.expand` / `mix ash.codegen`).",
       "mix phx.server",
-      if(args.admin?,
-        do:
-          "Register a user at /register, then visit /kumi-admin.\n" <>
-            "     Every account your sign-in accepts is a full admin there: once your own account\n" <>
-            "     exists, set `registration_enabled? false` on the password strategy, or pass\n" <>
-            "     kumi_admin `actor: {#{web_module}.AdminActor, :fetch}` returning nil for\n" <>
-            "     non-admins (kumi/guides/auth.md)."
-      ),
+      if(args.admin?, do: admin_step(args)),
       "mix kumi.plan / mix kumi.report — inspect and verify your app."
     ]
     |> Enum.reject(&is_nil/1)
     |> Enum.with_index(1)
     |> Enum.map_join("\n", fn {step, i} -> "  #{i}. #{step}" end)
   end
+
+  # kumi_admin admits any actor, so every strategy that creates accounts is
+  # a way into it, and each one closes differently.
+  defp admin_step(args) do
+    web_module = "#{Macro.camelize(args.app_name)}Web"
+    closers = Enum.flat_map(args.auth_strategies ++ args.auth_providers, &registration_closer/1)
+
+    close =
+      if closers == [],
+        do: [],
+        else: ["Once your own account exists, close every way in that creates one:" | closers]
+
+    actor = [
+      "#{if closers == [], do: "Pass", else: "Or pass"} kumi_admin `actor: {#{web_module}.AdminActor, :fetch}` returning nil",
+      "for non-admins, which works whatever the strategies (kumi/guides/auth.md)."
+    ]
+
+    Enum.join(
+      [
+        "Register a user at /register, then visit /kumi-admin.",
+        "Every account your sign-in accepts is a full admin there."
+      ] ++ close ++ actor,
+      "\n     "
+    )
+  end
+
+  defp registration_closer("password"),
+    do: ["  - password: set `registration_enabled? false` on the strategy."]
+
+  # With registration off, ash_authentication signs in through a read
+  # action of that name and only builds one when none is defined.
+  defp registration_closer("magic_link"),
+    do: [
+      "  - magic_link: set `registration_enabled? false` and delete the generated",
+      "    `create :sign_in_with_magic_link` (a sign-in-only read action replaces it)."
+    ]
+
+  defp registration_closer("google"),
+    do: [
+      "  - google: any Google account can register. Set the OAuth consent screen to",
+      "    Internal, or check the hosted-domain claim in `register_with_google`."
+    ]
+
+  defp registration_closer("github"),
+    do: ["  - github: any GitHub account can register; use the `actor:` function below."]
+
+  # api_key only signs existing users in.
+  defp registration_closer(_strategy), do: []
 
   defp stream_cmd(cmd, args, opts \\ []) do
     {_output, status} =
