@@ -336,6 +336,54 @@ defmodule Mix.Tasks.KumiStorage.InstallTest do
       assert Enum.any?(igniter.notices, fn n ->
                IO.iodata_to_binary(n) =~ "already mounted"
              end)
+
+      assert igniter.warnings == []
+    end
+
+    test "a forward from before `config:` gets a warning with the replacement line" do
+      old_router = """
+      defmodule MyAppWeb.Router do
+        use MyAppWeb, :router
+
+        scope "/" do
+          forward "/uploads", KumiStorage.Plug
+        end
+      end
+      """
+
+      igniter =
+        test_project(app_name: :my_app, files: %{"lib/my_app_web/router.ex" => old_router})
+        |> Igniter.compose_task("kumi_storage.install", [])
+
+      assert_unchanged(igniter, "lib/my_app_web/router.ex")
+
+      assert Enum.any?(igniter.warnings, fn w ->
+               IO.iodata_to_binary(w) =~
+                 ~s(forward "/uploads", KumiStorage.Plug, config: {MyApp.Core.Attachment, :__kumi_storage_config__})
+             end)
+    end
+  end
+
+  describe "an Attachment that predates __kumi_storage_config__/0" do
+    test "gets a warning naming the function the forward calls" do
+      igniter =
+        test_project(
+          app_name: :my_app,
+          files: %{
+            "lib/my_app/core/attachment.ex" => """
+            defmodule MyApp.Core.Attachment do
+              def __kumi_attachment__, do: true
+            end
+            """
+          }
+        )
+        |> Igniter.compose_task("kumi_storage.install", [])
+
+      assert_unchanged(igniter, "lib/my_app/core/attachment.ex")
+
+      assert Enum.any?(igniter.warnings, fn w ->
+               IO.iodata_to_binary(w) =~ "has no __kumi_storage_config__/0"
+             end)
     end
   end
 

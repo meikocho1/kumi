@@ -90,10 +90,11 @@ if Code.ensure_loaded?(Igniter) do
       {exists?, igniter} = Igniter.Project.Module.module_exists(igniter, attachment_module)
 
       if exists? do
-        Igniter.add_notice(
-          igniter,
+        igniter
+        |> Igniter.add_notice(
           "Kumi Storage: #{inspect(attachment_module)} already exists — leaving it untouched."
         )
+        |> warn_unless_config_fn(attachment_module)
       else
         domain_module = Igniter.Project.Module.module_name(igniter, "Core")
         repo_module = Igniter.Project.Module.module_name(igniter, "Repo")
@@ -109,6 +110,43 @@ if Code.ensure_loaded?(Igniter) do
         #{inspect(domain_module)}.
         """)
       end
+    end
+
+    # An Attachment generated before the plug took `config:` (or written by
+    # hand) has no __kumi_storage_config__/0, and the forward this task
+    # mounts points at it — so say what to add instead of only "untouched".
+    defp warn_unless_config_fn(igniter, attachment_module) do
+      {igniter, defined?} =
+        case Igniter.Project.Module.find_module(igniter, attachment_module) do
+          {:ok, {igniter, _source, zipper}} ->
+            {igniter,
+             match?(
+               {:ok, _},
+               Igniter.Code.Function.move_to_def(zipper, :__kumi_storage_config__, 0)
+             )}
+
+          {:error, igniter} ->
+            {igniter, false}
+        end
+
+      if defined? do
+        igniter
+      else
+        Igniter.add_warning(igniter, """
+        Kumi Storage: #{inspect(attachment_module)} has no __kumi_storage_config__/0,
+        which KumiStorage.Plug's `config:` calls on every request. Add:
+
+            #{config_fn_source()}
+
+        and replace its :upload and :destroy actions with the ones
+        `mix kumi_storage.install` generates today (see the CHANGELOG).
+        """)
+      end
+    end
+
+    defp config_fn_source do
+      "def __kumi_storage_config__, do: {Application.fetch_env!(:kumi_storage, :backend), " <>
+        "Application.get_all_env(:kumi_storage) |> Keyword.delete(:backend)}"
     end
 
     defp attachment_source(attachment_module, domain_module, repo_module) do
@@ -270,15 +308,27 @@ if Code.ensure_loaded?(Igniter) do
           "Which router should Kumi Storage serve uploads from?"
         )
 
+      mounted = router && mounted(igniter, router)
+
       cond do
         router == nil ->
           Igniter.add_notice(igniter, no_router_snippet(attachment_module))
 
-        already_mounted?(igniter, router) ->
+        mounted == :with_config ->
           Igniter.add_notice(
             igniter,
             "Kumi Storage: already mounted in #{inspect(router)} — leaving it untouched."
           )
+
+        # A forward from before the plug took `config:`: KumiStorage.Plug.init/1
+        # raises on it, so re-running the installer must not call it fine.
+        mounted == :without_config ->
+          Igniter.add_warning(igniter, """
+          Kumi Storage: #{inspect(router)} forwards to KumiStorage.Plug without
+          `config:`, which the plug now requires. Replace that line with:
+
+              #{forward(attachment_module)}
+          """)
 
         true ->
           igniter
@@ -293,16 +343,25 @@ if Code.ensure_loaded?(Igniter) do
       end
     end
 
-    defp already_mounted?(igniter, router) do
+    defp mounted(igniter, router) do
       {_igniter, _source, zipper} = Igniter.Project.Module.find_module!(igniter, router)
 
-      match?(
-        {:ok, _},
-        Igniter.Code.Common.move_to(zipper, fn z ->
-          Igniter.Code.Function.function_call?(z, :forward, [2, 3]) and
-            Igniter.Code.Function.argument_equals?(z, 1, KumiStorage.Plug)
-        end)
-      )
+      case Igniter.Code.Common.move_to(zipper, fn z ->
+             Igniter.Code.Function.function_call?(z, :forward, [2, 3]) and
+               Igniter.Code.Function.argument_equals?(z, 1, KumiStorage.Plug)
+           end) do
+        {:ok, forward} ->
+          if Igniter.Code.Function.argument_matches_predicate?(
+               forward,
+               2,
+               &Igniter.Code.Keyword.keyword_has_path?(&1, [:config])
+             ),
+             do: :with_config,
+             else: :without_config
+
+        :error ->
+          :missing
+      end
     end
 
     # The plug resolves its config through the Attachment's
