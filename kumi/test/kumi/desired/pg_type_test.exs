@@ -66,6 +66,23 @@ defmodule Kumi.Desired.PgTypeTest do
       # udt_name — a permanent phantom type-change diff.
       assert PgType.from_ash(Ash.Type.Duration, []) == "interval"
     end
+
+    # Same bug class as :duration: each of these migration types used to
+    # fall through to its own atom name, which is never a real udt_name,
+    # so the column showed a permanent DANGEROUS type change.
+    test "float -> float8" do
+      assert PgType.from_ash(Ash.Type.Float, []) == "float8"
+    end
+
+    test "binary and term (storage type :binary) -> bytea" do
+      assert PgType.from_ash(Ash.Type.Binary, []) == "bytea"
+      assert PgType.from_ash(Ash.Type.Term, []) == "bytea"
+    end
+
+    test "time with microsecond precision (:time_usec) -> time" do
+      assert PgType.from_ash(Ash.Type.Time, precision: :microsecond) == "time"
+      assert PgType.from_ash(Ash.Type.Time, precision: :second) == "time"
+    end
   end
 
   describe "precision_from_ash/2 (empirically verified against the real spike DB, see moduledoc)" do
@@ -116,6 +133,47 @@ defmodule Kumi.Desired.PgTypeTest do
       # invisible to Kumi, because both sides report "vector" regardless of
       # dimensions.
       assert PgType.from_ash(Ash.Type.Vector, dimensions: {:weird, %{}}) == "vector"
+    end
+  end
+
+  describe "exact_type?/2 (may Kumi.Apply run ADD COLUMN with from_ash/2's name?)" do
+    defmodule MigrationTypeAs do
+      @moduledoc false
+      # A custom type whose migration type is whatever `as:` says, for the
+      # shapes no builtin Ash type produces.
+      def migration_type(constraints), do: Keyword.fetch!(constraints, :as)
+    end
+
+    test "a plain migration type is exact" do
+      assert PgType.exact_type?(Ash.Type.UUID, [])
+      assert PgType.exact_type?(Ash.Type.String, [])
+      assert PgType.exact_type?(Ash.Type.Float, [])
+      assert PgType.exact_type?({:array, Ash.Type.String}, [])
+      assert PgType.exact_type?(Ash.Type.Vector, [])
+    end
+
+    test "an unconstrained decimal is exact; one with precision or scale is not" do
+      assert PgType.exact_type?(Ash.Type.Decimal, [])
+      assert PgType.exact_type?(Ash.Type.Decimal, precision: :arbitrary, scale: :arbitrary)
+      refute PgType.exact_type?(Ash.Type.Decimal, precision: 10, scale: 2)
+      refute PgType.exact_type?(Ash.Type.Decimal, precision: 10)
+    end
+
+    test "a vector with dimensions is not exact" do
+      refute PgType.exact_type?(Ash.Type.Vector, dimensions: 1536)
+    end
+
+    # Ecto writes :string as varchar(255); :serial, :bigserial and
+    # :identity bring a sequence and NOT NULL with them.
+    test "a migration type Ecto expands in DDL, or an unrecognised one, is not exact" do
+      assert PgType.exact_type?(MigrationTypeAs, as: :text)
+
+      for expanded <- [:string, :serial, :bigserial, :identity, {:varchar, 20}] do
+        refute PgType.exact_type?(MigrationTypeAs, as: expanded), inspect(expanded)
+      end
+
+      refute PgType.exact_type?({:array, MigrationTypeAs}, as: :string)
+      refute PgType.exact_type?(WeirdAshType, [])
     end
   end
 

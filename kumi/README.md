@@ -141,8 +141,11 @@ Hint     = AshPostgres snapshots (history; rename disambiguation only)
 - Snapshot parsing depends on AshPostgres's internal, undocumented snapshot
   JSON format — an AshPostgres upgrade may break rename hints (covered by
   tests against real snapshot files, so breakage is caught loudly).
-- Data-aware checks ("this NOT NULL change would fail on 143 existing NULLs")
-  are planned but not implemented; classification is catalog-based only.
+- Data-aware checks are opt-in (`--probe`) and only annotate: NULL counts
+  for NOT NULL tightening, duplicate groups for a new unique index,
+  non-null counts for a dropped column, and row counts for a dropped table
+  or a type change (casts themselves are not probed). Classification
+  stays catalog-based.
 - Verified against a single host application so far.
 
 See [guides/ash-gotchas.md](guides/ash-gotchas.md) for Ash/Spark/AshPostgres/Igniter gotchas found while building Kumi.

@@ -84,15 +84,7 @@ if Code.ensure_loaded?(Igniter) do
           Igniter.add_warning(igniter, """
           Kumi Admin: no Phoenix router found or selected. Mount it manually:
 
-              import KumiAdmin.Router
-
-              kumi_admin "/kumi-admin",
-                app: #{inspect(app_module)},
-                on_mount: [{MyAppWeb.LiveUserAuth, :current_user}],
-                sign_out_path: "/sign-out",
-                sign_in_path: "/sign-in",
-                user_resource: MyApp.Accounts.User,
-                register_path: "/register"
+          #{manual_snippet(igniter, app_module)}
           """)
 
         already_mounted?(igniter, router) ->
@@ -162,15 +154,7 @@ if Code.ensure_loaded?(Igniter) do
       nothing was mounted. Add this to #{inspect(router)} yourself, inside
       an authenticated scope:
 
-          import KumiAdmin.Router
-
-          kumi_admin "/kumi-admin",
-            app: #{inspect(app_module)},
-            on_mount: [{MyAppWeb.LiveUserAuth, :current_user}],
-            sign_out_path: "/sign-out",
-            sign_in_path: "/sign-in",
-            user_resource: MyApp.Accounts.User,
-            register_path: "/register"
+      #{manual_snippet(igniter, app_module)}
 
       See `KumiAdmin.Router`'s moduledoc for what `:on_mount`/`:actor` need
       to provide.
@@ -200,12 +184,48 @@ if Code.ensure_loaded?(Igniter) do
           "no #{inspect(Igniter.Project.Module.module_name(igniter, "Accounts.User"))} module was found, so first-user onboarding (register-on-empty) was not wired — add `user_resource:`/`register_path:` yourself if you have a user resource under a different name."
         end
 
+      admin_actor = Igniter.Libs.Phoenix.web_module_name(igniter, "AdminActor")
+
       igniter
       |> Igniter.Libs.Phoenix.add_scope("/", contents, router: router, placement: :after)
       |> Igniter.add_notice("""
       Kumi Admin: mounted at /kumi-admin in #{inspect(router)}, using
       #{inspect(auth_module)} to resolve the actor, #{user_notice}
+
+      Every account your authentication accepts gets full /kumi-admin
+      access: resources without Ash policies (every Kumi.Resource
+      shorthand) let any actor read and write everything. To narrow it,
+      pass `actor: {#{inspect(admin_actor)}, :fetch}` to kumi_admin — a
+      function of the socket returning nil for non-admins, whom
+      KumiAdmin.Gate then redirects — which works whatever the sign-in.
+      Or, once the first user exists, close every strategy that can
+      register users: `registration_enabled? false` on password, and on
+      magic_link too (then also delete its generated
+      `create :sign_in_with_magic_link`). OAuth providers register anyone
+      the provider authenticates; kumi/guides/auth.md shows how to
+      restrict them.
       """)
+    end
+
+    # The conventional module names, resolved for this app rather than a
+    # literal `MyAppWeb`: a snippet that does not compile as pasted gets
+    # edited by hand, and that is where `on_mount` goes missing.
+    defp manual_snippet(igniter, app_module) do
+      auth_module = Igniter.Libs.Phoenix.web_module_name(igniter, "LiveUserAuth")
+      user_module = Igniter.Project.Module.module_name(igniter, "Accounts.User")
+
+      """
+          import KumiAdmin.Router
+
+          kumi_admin "/kumi-admin",
+            app: #{inspect(app_module)},
+            on_mount: [{#{inspect(auth_module)}, :current_user}],
+            sign_out_path: "/sign-out",
+            sign_in_path: "/sign-in",
+            user_resource: #{inspect(user_module)},
+            register_path: "/register"
+      """
+      |> String.trim_trailing()
     end
   end
 else

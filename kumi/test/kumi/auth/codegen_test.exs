@@ -25,6 +25,28 @@ defmodule Kumi.Auth.CodegenTest do
     source
   end
 
+  # Compiles the one `fn` in `source` whose body mentions `marker`, so a
+  # guard is exercised as code rather than only matched as text.
+  defp generated_fn!(source, marker) do
+    {_ast, fns} =
+      source
+      |> Code.string_to_quoted!()
+      |> Macro.prewalk([], fn
+        {:fn, _, _} = node, acc -> {node, [node | acc]}
+        node, acc -> {node, acc}
+      end)
+
+    assert [fun] = Enum.filter(fns, &(Macro.to_string(&1) =~ marker))
+    {fun, _binding} = Code.eval_quoted(fun)
+    fun
+  end
+
+  defp user_info_changeset(user_info) do
+    Kumi.Test.Account
+    |> Ash.Changeset.new()
+    |> Ash.Changeset.set_argument(:user_info, user_info)
+  end
+
   describe "strategy/2" do
     test "every supported provider generates parseable DSL naming the secrets module" do
       for provider <- Codegen.providers() do
@@ -93,7 +115,97 @@ defmodule Kumi.Auth.CodegenTest do
         )
 
       assert with_confirmation =~ "change set_attribute(:confirmed_at, &DateTime.utc_now/0)"
+      assert with_confirmation =~ "Unconfirmed user exists already"
       refute without =~ "confirmed_at"
+      refute without =~ "Unconfirmed user exists already"
+    end
+
+    test "an upsert matched by email only accepts an address the provider verified" do
+      # The upsert finds the returning user by email. Without this guard,
+      # whoever a provider lets claim an address signs in as its owner.
+      for provider <- Codegen.providers() do
+        source =
+          quotable!(
+            Codegen.register_action(provider,
+              upsert_identity: :unique_email,
+              confirmed_at?: false
+            )
+          )
+
+        assert source =~ ~s(%{"email_verified" => verified})
+      end
+    end
+
+    test "without an upsert nothing is matched by email, so there is no guard" do
+      for provider <- Codegen.providers() do
+        source =
+          quotable!(Codegen.register_action(provider, upsert_identity: nil, confirmed_at?: true))
+
+        refute source =~ "email_verified"
+      end
+    end
+
+    test "the verified-email guard fails closed" do
+      guard =
+        Codegen.register_action(:oidc, upsert_identity: :unique_email, confirmed_at?: false)
+        |> generated_fn!("email_verified")
+
+      verified? = fn user_info -> guard.(user_info_changeset(user_info), %{}).valid? end
+
+      assert verified?.(%{"email" => "a@example.com", "email_verified" => true})
+      # Older Assent passes a provider's string claim through uncast.
+      assert verified?.(%{"email" => "a@example.com", "email_verified" => "true"})
+
+      refute verified?.(%{"email" => "a@example.com", "email_verified" => false})
+      refute verified?.(%{"email" => "a@example.com", "email_verified" => "false"})
+      # A provider that does not send the claim at all signs nobody in.
+      refute verified?.(%{"email" => "a@example.com"})
+    end
+
+    test "the confirmation guard refuses an existing account nobody confirmed" do
+      # upsert_fields [] leaves an existing row's confirmed_at alone, so an
+      # address registered with a password and never confirmed comes back
+      # nil here — and must not be signed in to by the provider's user.
+      guard =
+        Codegen.register_action(:google, upsert_identity: :unique_email, confirmed_at?: true)
+        |> generated_fn!("confirmed_at")
+
+      assert {:error, "Unconfirmed user exists already"} =
+               guard.(nil, %{confirmed_at: nil}, %{})
+
+      confirmed = %{confirmed_at: ~U[2026-01-01 00:00:00Z]}
+      assert {:ok, ^confirmed} = guard.(nil, confirmed, %{})
+    end
+  end
+
+  describe "email_verified_notice/2" do
+    test "oidc explains why a provider without the claim cannot sign in" do
+      notice = Codegen.email_verified_notice(:oidc, :unique_email)
+
+      assert notice =~ "email_verified"
+      assert notice =~ "Microsoft Entra ID"
+    end
+
+    test "nothing to say when the provider always sends the claim, or nothing is guarded" do
+      assert Codegen.email_verified_notice(:google, :unique_email) == nil
+      assert Codegen.email_verified_notice(:github, :unique_email) == nil
+      assert Codegen.email_verified_notice(:oidc, nil) == nil
+    end
+  end
+
+  describe "unconfirmed_notice/4" do
+    test "warns when an email-matched action has a password but no confirmation" do
+      notice = Codegen.unconfirmed_notice(:google, :unique_email, false, true)
+
+      assert notice =~ "register_with_google"
+      assert notice =~ "confirmed_at"
+      assert notice =~ "confirmation add-on"
+    end
+
+    test "nothing to say when confirmation guards it, nothing is matched, or there is no password" do
+      assert Codegen.unconfirmed_notice(:google, :unique_email, true, true) == nil
+      assert Codegen.unconfirmed_notice(:google, nil, false, true) == nil
+      assert Codegen.unconfirmed_notice(:google, :unique_email, false, false) == nil
     end
   end
 

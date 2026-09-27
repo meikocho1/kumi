@@ -34,6 +34,26 @@ defmodule Kumi.Schema.DefaultTest do
       assert Default.from_sql("0") == Default.from_ash(0)
       assert Default.from_sql("false") == Default.from_ash(false)
     end
+
+    # Each of these is the text Postgres 16 really reports in
+    # information_schema.columns.column_default for that default.
+    test "a doubled quote inside the literal is unescaped" do
+      assert Default.from_sql("'it''s'::text") == {:literal, "it's"}
+      assert Default.from_sql("'it''s'::text") == Default.from_ash("it's")
+    end
+
+    test "a cast to a multi-word or array type is still a literal" do
+      assert Default.from_sql("'a'::character varying") == {:literal, "a"}
+      assert Default.from_sql("'{}'::text[]") == {:literal, "{}"}
+    end
+
+    test "an expression built from two literals is not one literal" do
+      assert Default.from_sql("'a'::text || 'b'::text") == :generated
+    end
+
+    test "an empty map default round-trips against the Ash side" do
+      assert Default.from_sql("'{}'::jsonb") == Default.from_ash(%{})
+    end
   end
 
   describe "from_ash/1 (desired side: raw Ash attribute.default)" do
@@ -48,6 +68,40 @@ defmodule Kumi.Schema.DefaultTest do
 
     test "a literal term default (e.g. an atom) becomes a literal string" do
       assert Default.from_ash(:lead) == {:literal, "lead"}
+    end
+
+    test "an MFA default is generated, the same as a function" do
+      assert Default.from_ash({Ash.UUID, :generate, []}) == :generated
+    end
+
+    # `to_string/1` raised on every one of these, which took the whole plan
+    # down with it.
+    test "a map default is its JSON text" do
+      assert Default.from_ash(%{}) == {:literal, "{}"}
+      assert Default.from_ash(%{"a" => 1}) == {:literal, ~s({"a":1})}
+      assert Default.from_ash(%{a: {1, 2}}) == {:literal, "%{a: {1, 2}}"}
+    end
+
+    # Jason raises, rather than returning an error, for a key it can't
+    # turn into a string.
+    test "a map default whose keys aren't JSON keys is inspected rather than raising" do
+      assert Default.from_ash(%{{:a, :b} => 1}) == {:literal, "%{{:a, :b} => 1}"}
+      assert Default.from_ash(%{[:a] => 1}) == {:literal, "%{[:a] => 1}"}
+      assert Default.from_ash(%{"a" => %{%{} => 1}}) == {:literal, ~s(%{"a" => %{%{} => 1}})}
+    end
+
+    test "a list default is a literal, whatever it holds" do
+      assert Default.from_ash([]) == {:literal, "[]"}
+      assert Default.from_ash([:a]) == {:literal, "[:a]"}
+    end
+
+    test "a struct with String.Chars keeps its to_string/1 form" do
+      assert Default.from_ash(Decimal.new("0.00")) == {:literal, "0.00"}
+      assert Default.from_ash(~D[2026-01-01]) == {:literal, "2026-01-01"}
+    end
+
+    test "a term with no String.Chars is inspected rather than raising" do
+      assert Default.from_ash({1, 2}) == {:literal, "{1, 2}"}
     end
   end
 end

@@ -21,12 +21,17 @@ The installer composes `mix kumi.install` and then does three things:
 
 1. Generates `lib/<app>/core/attachment.ex` — an ordinary
    `Ash.Resource` storing uploaded-file metadata, with an `:upload` action
-   (validation + backend `store/4`) and a `__kumi_attachment_url__/1` URL
-   function. Registered in `<App>.Core`.
+   (`KumiStorage.Upload.prepare/3`: validation, then backend `store/4`)
+   and a `__kumi_attachment_url__/1` URL function. Registered in
+   `<App>.Core`.
 2. Adds `config :kumi_storage, backend: KumiStorage.Backend.Local, root:
-   "priv/uploads"` if nothing is configured yet.
-3. Forwards a router path to `KumiStorage.Plug`, or prints the snippet if
-   it can't find a router to edit.
+   "priv/uploads"` if nothing is configured yet, and adds
+   `/priv/uploads/` to `.gitignore` so uploaded files are never committed.
+   That root is relative to the working directory: in production, set an
+   absolute one in `config/runtime.exs`.
+3. Forwards a router path to `KumiStorage.Plug` (see
+   [Backends](#backends) for its `config:` option), or prints the snippet
+   if it can't find a router to edit.
 
 `mix kumi.new my_app --with storage` does all of this at generation time.
 
@@ -57,6 +62,41 @@ the backend is called — backends do not validate.
 | Size cap | 10 MB | `:max_bytes` |
 | Content-type allowlist | `image/jpeg`, `image/png`, `image/gif`, `image/webp` | `:allowed_content_types` |
 
+The generated `:upload` action gets there through
+`KumiStorage.Upload.prepare/3`, which:
+
+- measures the size itself: `byte_size/1` of a `{:binary, data}`, or
+  `File.stat/1` of a `{:path, path}` when the changeset is built. A
+  `:byte_size` the caller declares is ignored, so a false one can't get
+  past the cap or be saved. A path must name a regular file that doesn't
+  change before the action runs, as a `Plug.Upload` or LiveView temp file
+  does; a device, FIFO or directory is rejected. The path is trusted
+  input, since the copy reads whatever file it names: never build one
+  from request params.
+- calls the backend's `store/4` only once the action runs, inside the
+  transaction, after the policies Ash can check up front. Building the
+  changeset (a form validate, `Ash.can?/3`) stores nothing, and a caller
+  those policies forbid never writes a file.
+- deletes the stored file if the create fails after that. That includes a
+  filter policy such as `authorize_if expr(owner_id == ^actor(:id))`: Ash
+  checks it against the inserted row, so the file is written first, then
+  the create is rolled back and the file deleted.
+- reports a backend failure as a fixed "upload failed" error and logs the
+  reason, so backend internals never reach the caller.
+
+The content type is the caller's claim; see [Serving](#serving) for how
+it is contained. The destroy action deletes the file only after the
+transaction commits, and logs a delete that fails.
+
+Both calls are library functions made from your plain Ash resource, so
+fixes to them arrive with a dependency upgrade. An Attachment generated
+before `KumiStorage.Upload` existed still has the old inline change
+bodies, because the installer never overwrites the file: replace its
+`:upload` and `:destroy` actions with the ones the installer generates
+now, add `__kumi_storage_config__/0`, and give the router's forward its
+`config:` option (see [Backends](#backends)); the plug refuses to
+compile without it.
+
 ## Backends
 
 `KumiStorage.Backend` is the behaviour; `KumiStorage.Backend.Local`
@@ -64,10 +104,19 @@ the backend is called — backends do not validate.
 planned follow-up rather than a speculative abstraction.
 
 Every callback takes `opts` explicitly — backends never read Application
-config themselves. `KumiStorage.Plug` is the config-reading boundary: it
-resolves `config :kumi_storage, ...` once per request and passes the result
-down. This keeps backends pure and directly testable, and matches the
-repo-wide "library code takes explicit args" rule.
+config themselves, and neither does any other kumi_storage module. The
+config boundary is host code: the generated Attachment's
+`__kumi_storage_config__/0` reads `config :kumi_storage, ...` and returns
+`{backend, backend_opts}`. Its actions call it, and the router hands it to
+the plug, which calls it once per request (so `config/runtime.exs` works):
+
+```elixir
+forward "/uploads", KumiStorage.Plug,
+  config: {MyApp.Core.Attachment, :__kumi_storage_config__}
+```
+
+This keeps backends pure and directly testable, and matches the repo-wide
+"library code takes explicit args" rule.
 
 ## Serving
 
@@ -81,6 +130,22 @@ dependency. Security posture:
   `Plug.Conn.send_file/3` never sees a path a client shouldn't reach.
 - Every response, success and 404, carries `x-content-type-options:
   nosniff`.
+
+### Access control
+
+`/uploads/:key` is unauthenticated. The random key in the URL is the only
+thing protecting a file: anyone holding the URL can fetch the bytes, with
+no session and no actor. Ash policies on the Attachment, or on the record
+that points at it, do not apply to the file itself.
+
+Replacing an attachment or deleting its parent record does not unpublish
+the old file; only destroying the Attachment deletes it. Don't serve
+documents that must stay private this way without putting your own plug
+or pipeline in front of the forward.
+
+The generated `storage_key` attribute is `public? false`, so the key stays
+out of public interfaces (`filter_input`, API extensions). Your own reads
+still load it, which is what `__kumi_attachment_url__/1` uses.
 
 ## Development
 

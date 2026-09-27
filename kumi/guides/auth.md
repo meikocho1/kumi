@@ -79,10 +79,10 @@ Ordinary Ash source you can read and edit — this is D1, not a wrapper.
 Run it with `--dry-run` first and you'll see exactly this:
 
 **1. A `UserIdentity` resource**, if you don't already have one. Every
-OAuth2 strategy needs it: only the provider's `iss`/`sub` pair identifies
-a returning user stably, and matching on email address is not safe.
-Generated with the Postgres table, the policy bypass and the domain
-registration already wired.
+OAuth2 strategy needs it: it records the provider's `iss`/`sub` pair
+against each user. It does not decide which user a sign-in lands on —
+see 3. Generated with the Postgres table, the policy bypass and the
+domain registration already wired.
 
 **2. The strategy block**, inserted into your existing `authentication do
 strategies do` rather than appended as a second one:
@@ -108,6 +108,31 @@ assumed:
 
 `upsert_fields []` is deliberate: signing in again must not overwrite the
 local record from the provider profile.
+
+A returning user is matched **by email**, through your `:unique_email`
+identity: whoever the provider says owns `alice@example.com` gets the
+local `alice@example.com` account, including one that was registered
+with a password. That is only safe when the provider vouches for the
+address, so the action carries two guards:
+
+- **Verified email.** The action rejects the sign-in unless the
+  provider's `user_info` has `email_verified: true`. Google and GitHub
+  always send it. A generic OIDC provider may not — Microsoft Entra ID
+  doesn't by default — and then every sign-in fails until it does. That
+  failure is the point: don't delete the check to make sign-in work.
+- **Unconfirmed account.** With the confirmation add-on, it refuses to
+  sign in to an existing account whose `confirmed_at` is still `nil`:
+  someone registered that address and never proved they own it, and
+  may know its password. This is the `after_action` from
+  `ash_authentication`'s own 4.x OAuth2 tutorials.
+
+Without the confirmation add-on only the first guard exists. If your
+user resource also has a password, anyone can register
+`alice@example.com` with a password before Alice first signs in with the
+provider, and from then on both her sign-in and the stranger's password
+open the same account. `mix kumi.gen.auth` prints a notice when it
+generates an action in that state; add the confirmation add-on (and the
+`after_action` above), or turn off password registration.
 
 **4. `secret_for/4` clauses** on your `Secrets` module, reading from
 application env. No credential is ever written into source.
@@ -154,6 +179,57 @@ kumi_admin "/admin",
   on_mount: [{MyAppWeb.LiveUserAuth, :current_user}]
 ```
 
+The flip side: kumi_admin only checks that there *is* an actor. Every
+account your authentication accepts — including anyone who registers
+themselves at `/register` — gets full admin access, because resources
+without Ash policies let any actor read and write everything, and a
+`Kumi.Resource` shorthand never has policies (it doesn't add
+`Ash.Policy.Authorizer`). On a fresh deploy with zero users, the first
+visitor to the admin is sent to `/register`, so create your own account
+before the app is reachable. Then narrow it, either way:
+
+- Once the first user exists, close every strategy that can register
+  users. Closing one leaves the others open:
+  - **password:** set `registration_enabled? false`.
+  - **magic_link:** set `registration_enabled? false`, and delete the
+    generated `create :sign_in_with_magic_link` action. With
+    registration off, `ash_authentication` signs in through a *read*
+    action of that name, and builds one itself only when none is
+    defined; keep the create and every magic-link sign-in fails.
+  - **google, github, oidc:** the generated `register_with_<provider>`
+    admits any account the provider authenticates. Here
+    `registration_enabled? false` alone doesn't compile, since the
+    strategy then wants a hand-written `sign_in_with_<provider>` read
+    action. For Google and OIDC, restrict it at the provider or check
+    the claim instead (see
+    [Delegate MFA](#delegate-mfa-to-the-identity-provider-recommended)
+    below); for GitHub, use the `actor:` gate.
+- Pass `kumi_admin/2` an `actor:` that returns `nil` for anyone who
+  isn't an admin. This works whatever the strategies. `KumiAdmin.Gate`
+  redirects an actor-less visit, so they never see the shell:
+
+  ```elixir
+  kumi_admin "/admin",
+    app: MyApp.App,
+    on_mount: [{MyAppWeb.LiveUserAuth, :current_user}],
+    actor: {MyAppWeb.AdminActor, :fetch}
+  ```
+
+  ```elixir
+  defmodule MyAppWeb.AdminActor do
+    # `admin?` is an attribute you add to your user resource.
+    def fetch(socket) do
+      case socket.assigns[:current_user] do
+        %{admin?: true} = user -> user
+        _ -> nil
+      end
+    end
+  end
+  ```
+
+For anything finer than admin-or-not, write the resource in plain Ash
+with policies; kumi_admin respects them.
+
 ## Two-factor authentication
 
 **Be clear-eyed here: `ash_authentication` has no TOTP or 2FA strategy.**
@@ -173,9 +249,43 @@ already enforced by the organisation's own policy. Your app sees an
 authenticated identity; enrolment, recovery codes, hardware keys, "trust
 this device", and the compliance paperwork all stay upstream.
 
-For an internal or B2B admin this is the whole answer — configure OIDC (or
-Google/Auth0 above), turn MFA on in the provider's console, and stop.
-Zero security-critical code in your repo.
+That settles *how* people sign in, not *who* may. The generated
+`register_with_google` and `register_with_oidc` admit any account the
+provider authenticates. With `google` that is every Google account, not
+only your Workspace's, and turning MFA on in your admin console does
+nothing about an outside gmail.com account. Google's `hd` authorize
+parameter doesn't change that — it only filters the account chooser, and
+Google says not to rely on it. To keep sign-in to your organisation:
+
+- set the Google Cloud OAuth consent screen's user type to **Internal**,
+  so only your Workspace's accounts can complete the flow; or
+- check the hosted-domain claim in `register_with_google`, next to the
+  verified-email guard:
+
+  ```elixir
+  change fn changeset, _ctx ->
+    case Ash.Changeset.get_argument(changeset, :user_info) do
+      %{"hd" => "example.com"} ->
+        changeset
+
+      _ ->
+        Ash.Changeset.add_error(changeset,
+          field: :user_info,
+          message: "not an example.com account"
+        )
+    end
+  end
+  ```
+
+  The key depends on your Assent version, the library underneath
+  `ash_authentication`'s OAuth2 strategies: `"hd"` with Assent 0.3,
+  `"google_hd"` with Assent 0.2. For an OIDC provider with no such
+  claim, check the domain of the (verified) `"email"` instead.
+
+Then, for an internal or B2B admin, this is the whole answer — configure
+OIDC (or Google/Auth0 above), restrict who can sign in, turn MFA on in
+the provider's console, and stop. Zero security-critical code in your
+repo.
 
 ### Build a TOTP second factor yourself
 
@@ -220,5 +330,9 @@ to parse (`kumi/test/kumi/auth/codegen_test.exs`).
 credentials from Google and GitHub, which this repository does not have,
 so nobody here has watched a browser complete a callback. The
 provider-specific option names come from `ash_authentication`'s own
-tutorials. Run the flow against your own provider before shipping, and
-treat a working `mix compile` as necessary but not sufficient.
+tutorials, and the `email_verified` claim the verified-email guard reads
+was checked against the source of Assent (the library its OAuth2
+strategies are built on), not a live callback. The guards themselves are
+unit tested as code. Run the flow against your own provider before
+shipping, and treat a working `mix compile` as necessary but not
+sufficient.

@@ -32,11 +32,17 @@ defmodule Mix.Tasks.Kumi.Gen.Auth.Docs do
     ## What it generates, per provider
 
       1. A `UserIdentity` resource if you don't have one. OAuth2 needs it:
-         only the provider's `iss`/`sub` pair identifies a returning user
-         stably. Matching on email address is not safe.
+         it records the provider's `iss`/`sub` pair against each user.
       2. The strategy block inside `authentication do strategies do`.
       3. A `register_with_<provider>` upsert action handling both
-         registration and sign-in.
+         registration and sign-in. A returning user is matched by email,
+         through the `:unique_email` identity. The action rejects any
+         address the provider has not marked `email_verified`, and, with
+         the confirmation add-on, it refuses to sign in to an existing
+         account whose email was never confirmed. Without that add-on a
+         resource that also has a password is not protected against
+         someone pre-registering another person's address; the task says
+         so when it generates the action.
       4. `secret_for/4` clauses on your `Secrets` module reading from
          application env.
 
@@ -67,7 +73,14 @@ defmodule Mix.Tasks.Kumi.Gen.Auth.Docs do
     There is no TOTP strategy in `ash_authentication`, and Kumi does not
     add one. Generating `oidc` (or `google` against a Workspace domain)
     is the supported path to MFA: enrolment, recovery codes and hardware
-    keys stay with the identity provider. See `guides/auth.md`.
+    keys stay with the identity provider.
+
+    That decides how people sign in, not who may. The generated action
+    admits any account the provider authenticates — for `google`, any
+    Google account, not only your Workspace's. Google's `hd` authorize
+    parameter is a UI hint and restricts nothing; set the OAuth consent
+    screen to Internal, or check the hosted-domain claim in
+    `register_with_google`. See `guides/auth.md`.
     """
   end
 end
@@ -260,8 +273,11 @@ if Code.ensure_loaded?(Igniter) do
       {igniter, confirm?} =
         Ash.Resource.Igniter.defines_attribute(igniter, opts[:user], :confirmed_at)
 
-      Ash.Resource.Igniter.add_new_action(
-        igniter,
+      {igniter, password?} =
+        Ash.Resource.Igniter.defines_attribute(igniter, opts[:user], :hashed_password)
+
+      igniter
+      |> Ash.Resource.Igniter.add_new_action(
         opts[:user],
         :"register_with_#{name}",
         Kumi.Auth.Codegen.register_action(name,
@@ -269,7 +285,14 @@ if Code.ensure_loaded?(Igniter) do
           confirmed_at?: confirm?
         )
       )
+      |> maybe_notice(Kumi.Auth.Codegen.email_verified_notice(name, upsert_identity))
+      |> maybe_notice(
+        Kumi.Auth.Codegen.unconfirmed_notice(name, upsert_identity, confirm?, password?)
+      )
     end
+
+    defp maybe_notice(igniter, nil), do: igniter
+    defp maybe_notice(igniter, notice), do: Igniter.add_notice(igniter, notice)
 
     # Without a unique identity on the user resource the upsert has nothing
     # to match on, and generating `upsert_identity :unique_email` anyway

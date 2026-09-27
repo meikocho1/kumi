@@ -14,6 +14,9 @@ defmodule KumiAdmin.Router do
 
   ## Options
 
+  An unknown option (a typo such as `sign_in_pth:`) raises an
+  `ArgumentError` when the router compiles, instead of being ignored.
+
     * `:app` (required) — the `Kumi.App` module to render.
     * `:on_mount` — `on_mount` hooks run before every KumiAdmin LiveView.
       Use this to populate whatever assign your `:actor` option reads
@@ -21,6 +24,8 @@ defmodule KumiAdmin.Router do
       itself. See `KumiAdmin.Actor`.
     * `:actor` — `{Module, :function}` resolving the Ash actor from the
       mounted socket. Defaults to `{KumiAdmin.Actor, :from_current_user}`.
+      Anything else (e.g. a `&MyAuth.actor/1` capture) raises an
+      `ArgumentError` when the router compiles.
     * `:sign_out_path` — href for the shell's "Sign out" link. Defaults to
       `"/sign-out"`. KumiAdmin does not implement sign-out itself; point
       this at the host's real route.
@@ -61,28 +66,67 @@ defmodule KumiAdmin.Router do
 
   ## Actor handoff
 
-  KumiAdmin's own `live_session` does not override the LiveView `session`
-  wholesale — it reads the full Plug session (via `Plug.Conn.get_session/1`)
-  and adds its own two keys, so whatever your `on_mount` hooks need from the
-  Plug session (e.g. `ash_authentication_phoenix`'s `user_token`) is still
-  there. Without an actor, policy-protected resources legitimately come
-  back empty/forbidden — the shell renders that honestly instead of
-  crashing.
+  KumiAdmin's `live_session` session holds only its own keys:
+  `"kumi_admin_path"`, `"kumi_admin_app"`, `"kumi_admin_actor"` (the
+  `:actor` pair), `"kumi_admin_sign_out_path"`, `"kumi_admin_sign_in_path"`,
+  `"kumi_admin_user_resource"`, `"kumi_admin_register_path"` and
+  `"kumi_admin_strings"` (the `:strings` overrides). LiveView signs that
+  map — signs, does not encrypt — into the page's `data-phx-session`
+  token, so it deliberately carries no copy of the cookie session: a
+  bearer token such as `ash_authentication_phoenix`'s `user_token` must
+  never end up readable in the page markup.
+
+  Your `on_mount` hooks still see the cookie session, because LiveView
+  merges it in itself: from the conn on the dead render, and from the
+  socket's `connect_info` on the connected mount. The latter needs the
+  endpoint's
+
+      socket "/live", Phoenix.LiveView.Socket,
+        websocket: [connect_info: [session: @session_options]]
+
+  which `phx.new` generates. Without it, a hook that reads the session
+  finds nothing on the connected mount — no actor, so the gate redirects
+  to `:sign_in_path`.
   """
+
+  # Every optional key and its default, defined once: the macro validates
+  # against this list and `KumiAdmin.Context` falls back to it.
+  @defaults [
+    on_mount: [],
+    actor: {KumiAdmin.Actor, :from_current_user},
+    sign_out_path: "/sign-out",
+    sign_in_path: "/sign-in",
+    user_resource: nil,
+    register_path: "/register",
+    strings: %{},
+    live_session_name: :kumi_admin
+  ]
+
+  @doc false
+  def __defaults__, do: @defaults
 
   defmacro kumi_admin(path, opts \\ []) do
     quote bind_quoted: [path: path, opts: opts] do
       import Phoenix.LiveView.Router
 
+      opts = Keyword.validate!(opts, [:app | KumiAdmin.Router.__defaults__()])
       app = Keyword.fetch!(opts, :app)
-      actor_fun = Keyword.get(opts, :actor, {KumiAdmin.Actor, :from_current_user})
-      sign_out_path = Keyword.get(opts, :sign_out_path, "/sign-out")
-      sign_in_path = Keyword.get(opts, :sign_in_path, "/sign-in")
-      user_resource = Keyword.get(opts, :user_resource, nil)
-      register_path = Keyword.get(opts, :register_path, "/register")
-      on_mount_hooks = Keyword.get(opts, :on_mount, [])
-      strings = Keyword.get(opts, :strings, %{})
-      live_session_name = Keyword.get(opts, :live_session_name, :kumi_admin)
+      actor_fun = Keyword.fetch!(opts, :actor)
+
+      # `KumiAdmin.Actor.resolve/2` applies exactly this pair; a capture
+      # would otherwise compile and only fail on the first mount.
+      if not match?({m, f} when is_atom(m) and is_atom(f), actor_fun) do
+        raise ArgumentError,
+              "kumi_admin :actor must be a {Module, :function} pair, got: #{inspect(actor_fun)}"
+      end
+
+      sign_out_path = Keyword.fetch!(opts, :sign_out_path)
+      sign_in_path = Keyword.fetch!(opts, :sign_in_path)
+      user_resource = Keyword.fetch!(opts, :user_resource)
+      register_path = Keyword.fetch!(opts, :register_path)
+      on_mount_hooks = Keyword.fetch!(opts, :on_mount)
+      strings = Keyword.fetch!(opts, :strings)
+      live_session_name = Keyword.fetch!(opts, :live_session_name)
 
       live_session live_session_name,
         on_mount: on_mount_hooks,
@@ -107,9 +151,11 @@ defmodule KumiAdmin.Router do
     end
   end
 
+  # Starts from an empty map, never `Plug.Conn.get_session/1`: this return
+  # value is what LiveView signs into the page (see "Actor handoff").
   @doc false
   def __session__(
-        conn,
+        _conn,
         path,
         app,
         actor_fun,
@@ -119,15 +165,15 @@ defmodule KumiAdmin.Router do
         register_path,
         strings
       ) do
-    conn
-    |> Plug.Conn.get_session()
-    |> Map.put("kumi_admin_path", path)
-    |> Map.put("kumi_admin_app", app)
-    |> Map.put("kumi_admin_actor", actor_fun)
-    |> Map.put("kumi_admin_sign_out_path", sign_out_path)
-    |> Map.put("kumi_admin_sign_in_path", sign_in_path)
-    |> Map.put("kumi_admin_user_resource", user_resource)
-    |> Map.put("kumi_admin_register_path", register_path)
-    |> Map.put("kumi_admin_strings", strings)
+    %{
+      "kumi_admin_path" => path,
+      "kumi_admin_app" => app,
+      "kumi_admin_actor" => actor_fun,
+      "kumi_admin_sign_out_path" => sign_out_path,
+      "kumi_admin_sign_in_path" => sign_in_path,
+      "kumi_admin_user_resource" => user_resource,
+      "kumi_admin_register_path" => register_path,
+      "kumi_admin_strings" => strings
+    }
   end
 end

@@ -62,6 +62,35 @@ defmodule Mix.Tasks.KumiAdmin.InstallTest do
            end)
   end
 
+  test "the manual snippets name this app's modules, not MyAppWeb" do
+    # A snippet that does not compile as pasted gets edited by hand under
+    # time pressure — which is where `on_mount` goes missing.
+    no_router =
+      test_project(app_name: :shop)
+      |> Igniter.compose_task("kumi_admin.install", [])
+
+    no_auth =
+      test_project(
+        app_name: :shop,
+        files: %{"lib/shop_web/router.ex" => String.replace(@router, "MyApp", "Shop")}
+      )
+      |> Igniter.compose_task("kumi_admin.install", [])
+
+    snippets = [
+      Enum.find(no_router.warnings, &(IO.iodata_to_binary(&1) =~ "kumi_admin \"")),
+      Enum.find(no_auth.notices, &(IO.iodata_to_binary(&1) =~ "could not confirm"))
+    ]
+
+    for snippet <- snippets do
+      assert snippet, "no manual snippet was printed"
+      snippet = IO.iodata_to_binary(snippet)
+
+      assert snippet =~ "on_mount: [{ShopWeb.LiveUserAuth, :current_user}]"
+      assert snippet =~ "user_resource: Shop.Accounts.User"
+      refute snippet =~ "MyApp"
+    end
+  end
+
   test "router + LiveUserAuth with :current_user clause: mounts kumi_admin for real" do
     igniter =
       test_project(
@@ -81,6 +110,34 @@ defmodule Mix.Tasks.KumiAdmin.InstallTest do
     assert content =~ "kumi_admin"
     assert content =~ "MyAppWeb.LiveUserAuth"
     assert content =~ ":current_user"
+  end
+
+  test "the mount notice says every accepted account is a full admin, and how to narrow it" do
+    igniter =
+      test_project(
+        app_name: :my_app,
+        files: %{
+          "lib/my_app_web/router.ex" => @router,
+          "lib/my_app_web/live_user_auth.ex" => @live_user_auth_with_current_user
+        }
+      )
+      |> Igniter.compose_task("kumi_admin.install", [])
+
+    notice =
+      igniter.notices
+      |> Enum.map(&IO.iodata_to_binary/1)
+      |> Enum.find(&(&1 =~ "mounted at /kumi-admin"))
+
+    assert notice, "no mount notice was printed"
+    assert notice =~ "Every account your authentication accepts gets full /kumi-admin"
+    assert notice =~ "registration_enabled? false"
+    assert notice =~ "actor: {MyAppWeb.AdminActor, :fetch}"
+    # The installer can't see which strategies the host uses, and closing
+    # password alone leaves magic links and OAuth creating accounts.
+    notice = String.replace(notice, ~r/\s+/, " ")
+    assert notice =~ "every strategy that can register users"
+    assert notice =~ "`create :sign_in_with_magic_link`"
+    assert notice =~ "OAuth providers register anyone the provider authenticates"
   end
 
   test "router + LiveUserAuth + Accounts.User: mount includes user_resource and register_path" do

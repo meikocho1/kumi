@@ -13,30 +13,113 @@ defmodule Kumi.Resource.Codegen do
   # to catch "not-an-email" while accepting ordinary addresses.
   @email_regex_source "~r/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/"
 
-  # Mirrors the fixed attributes/actions `generate/3`'s template always
-  # emits (`uuid_primary_key :id`, `timestamps()`, the default action set)
-  # — kept alongside `emitted_members/1` since that's the only other place
-  # that needs to know the same fixed list.
+  # Mirrors the fixed attributes `generate/3`'s template always emits
+  # (`uuid_primary_key :id`, `timestamps()`) — kept alongside
+  # `emitted_members/1` since that's the only other place that needs to
+  # know the same fixed list.
   @default_attribute_names [:id, :inserted_at, :updated_at]
-  @default_action_names [:read, :destroy, :create, :update]
 
-  @typedoc "Names of attributes/relationships/actions the generated source declares."
+  # The `defaults` `generate/3` prints in `actions do ... end`. The action
+  # names `emitted_members/1` reports are read off it, and
+  # `default_actions/0` hands it to `Kumi.Resource`'s check.
+  @default_actions [:read, :destroy, create: :*, update: :*]
+  @default_action_names Enum.map(@default_actions, fn
+                          {type, _accept} -> type
+                          type -> type
+                        end)
+
+  @use_opt_keys [:domain, :repo, :table]
+
+  @typedoc "Names of the attributes/relationships/actions/identities/references the generated source declares."
   @type emitted_members :: %{
           attributes: [atom()],
           relationships: [atom()],
           actions: [atom()],
-          identities: [atom()]
+          identities: [atom()],
+          references: [atom()]
         }
 
   @doc """
-  The attribute/relationship/action/identity names `generate/3` actually
-  emits for these field specs. Used by `Kumi.Resource`'s `@after_verify`
-  check (H1 fix, blueprint §0 D1) to catch plain Ash DSL sections
-  (`attributes do ... end`, a second `relationships do ... end`,
-  `calculations`, `aggregates`, a hand-written `identities do ... end`)
-  declared alongside `fields do ... end` — those compile into the
-  resource but `mix kumi.expand` would never print them, silently
-  breaking "expand always prints exactly what compiles".
+  Checks the `use Kumi.Resource` options before anything reads them:
+  exactly `:domain`, `:repo` and `:table`, each once. Nothing else is
+  passed on to `use Ash.Resource`, so an `extensions:` or a misspelled
+  `tabel:` would otherwise be accepted and dropped.
+  """
+  @spec validate_opts!(term()) :: :ok
+  def validate_opts!(opts) do
+    {unexpected, missing} =
+      if Keyword.keyword?(opts) do
+        keys = Keyword.keys(opts)
+        # `--` removes one occurrence per allowed key, so a key given twice
+        # stays behind as unexpected.
+        {keys -- @use_opt_keys, @use_opt_keys -- keys}
+      else
+        {[], @use_opt_keys}
+      end
+
+    if unexpected != [] or missing != [] do
+      raise ArgumentError, use_opts_message(unexpected, missing)
+    end
+
+    :ok
+  end
+
+  defp use_opts_message(unexpected, missing) do
+    problems =
+      [
+        if(unexpected != [], do: "unexpected or repeated option(s) #{inspect(unexpected)}"),
+        if(missing != [], do: "missing option(s) #{inspect(missing)}")
+      ]
+      |> Enum.filter(& &1)
+      |> Enum.join(", ")
+
+    """
+    Kumi.Resource: `use Kumi.Resource` — #{problems}.
+
+    It takes exactly `domain:`, `repo:` and `table:`:
+
+        use Kumi.Resource,
+          domain: MyApp.Crm,
+          repo: MyApp.Repo,
+          table: "customers"
+
+    Anything else on the `use` line (`extensions:`, `authorizers:`, ...) \
+    belongs in plain Ash: remove it, run `mix kumi.expand` on this module, \
+    paste the output in place of the module and add the option to its \
+    `use Ash.Resource` line.
+    """
+  end
+
+  @doc """
+  The options `generate/3` prints on the `use Ash.Resource` line.
+  `Kumi.Resource.__using__/1` passes this same list to the `use Ash.Resource`
+  it expands, so the one line of the compiled module that is not spliced
+  in from `generate/3`'s output still comes from here.
+  """
+  @spec use_opts(keyword()) :: keyword()
+  def use_opts(opts) do
+    [domain: Keyword.fetch!(opts, :domain), data_layer: AshPostgres.DataLayer]
+  end
+
+  @doc """
+  The `defaults` list `generate/3` prints in `actions do ... end`.
+  `Kumi.Resource` compares the compiled resource's `defaults` against it,
+  because a second `actions do defaults ... end` replaces the value rather
+  than failing.
+  """
+  @spec default_actions() :: [atom() | {atom(), atom() | [atom()]}]
+  def default_actions, do: @default_actions
+
+  @doc """
+  The attribute/relationship/action/identity/reference names `generate/3`
+  actually emits for these field specs. Used by `Kumi.Resource`'s
+  `@before_compile` check (`Kumi.Resource.__before_compile__/1`; H1 fix,
+  blueprint §0 D1) to catch plain Ash DSL declared alongside `fields do
+  ... end` (`attributes do ... end`, a second `relationships do ... end`,
+  a hand-written `identities do ... end` or `postgres do references do
+  ... end end`, and so on) — those compile into the resource but `mix
+  kumi.expand` would never print them, silently breaking "expand always
+  prints exactly what compiles".
   """
   @spec emitted_members([FieldSpec.t()]) :: emitted_members()
   def emitted_members(field_specs) do
@@ -57,17 +140,22 @@ defmodule Kumi.Resource.Codegen do
 
     identity_names = for %FieldSpec{kind: :identity, name: name} <- field_specs, do: name
 
+    reference_names =
+      for %FieldSpec{kind: :belongs_to, name: name} = spec <- field_specs,
+          reference?(spec),
+          do: name
+
     %{
       attributes: @default_attribute_names ++ field_names ++ belongs_to_fk_names,
       relationships: relationship_names,
       actions: @default_action_names,
-      identities: identity_names
+      identities: identity_names,
+      references: reference_names
     }
   end
 
   @spec generate(module(), keyword(), [FieldSpec.t()]) :: String.t()
   def generate(module, opts, field_specs) do
-    domain = Keyword.fetch!(opts, :domain)
     repo = Keyword.fetch!(opts, :repo)
     table = Keyword.fetch!(opts, :table)
 
@@ -79,8 +167,7 @@ defmodule Kumi.Resource.Codegen do
     """
     defmodule #{inspect(module)} do
       use Ash.Resource,
-        domain: #{inspect(domain)},
-        data_layer: AshPostgres.DataLayer
+        #{use_opts_source(opts)}
 
       postgres do
         table #{inspect(table)}
@@ -88,7 +175,7 @@ defmodule Kumi.Resource.Codegen do
       end
 
       actions do
-        defaults [:read, :destroy, create: :*, update: :*]
+        defaults #{Macro.to_string(@default_actions)}
       end
 
       attributes do
@@ -104,6 +191,13 @@ defmodule Kumi.Resource.Codegen do
     |> Code.format_string!()
     |> IO.iodata_to_binary()
     |> Kernel.<>("\n")
+  end
+
+  # One option per line, as a hand-written `use Ash.Resource` usually has
+  # them — `Code.format_string!/1` keeps a keyword list broken across lines
+  # when it was written that way.
+  defp use_opts_source(opts) do
+    Enum.map_join(use_opts(opts), ",\n", fn {key, value} -> "#{key}: #{inspect(value)}" end)
   end
 
   defp attribute_source(%FieldSpec{name: name, type: type, opts: opts}) do
@@ -155,8 +249,12 @@ defmodule Kumi.Resource.Codegen do
   # and with none of them asking the block is omitted entirely — the
   # generated source has to read like source someone would write by hand
   # (D1), and nobody hand-writes an empty `references do ... end`.
+  # `emitted_members/1` counts the same entries, through the same predicate.
+  defp reference?(%FieldSpec{kind: :belongs_to, opts: opts}),
+    do: Keyword.has_key?(opts, :on_delete)
+
   defp references_block(belongs_tos) do
-    case Enum.filter(belongs_tos, &Keyword.has_key?(&1.opts, :on_delete)) do
+    case Enum.filter(belongs_tos, &reference?/1) do
       [] ->
         ""
 

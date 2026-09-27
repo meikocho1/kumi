@@ -7,10 +7,11 @@ defmodule Kumi.Desired.PgType do
   exact function AshPostgres itself uses to decide migration column types —
   rather than re-deriving the Ash-type-to-postgres-type mapping by hand.
   That call returns an Ecto migration type (`:uuid`, `:text`, `{:decimal, _,
-  _}`, ...); the second step below mirrors Ecto's own
-  `Ecto.Adapters.Postgres.Connection.ecto_to_db/1`, which is what turns that
-  migration type into the literal SQL type Postgres stores (and therefore
-  what pg_catalog reports back).
+  _}`, ...); the second step below maps that migration type to the
+  `udt_name` Postgres stores for the column it creates. That is not the
+  spelling Ecto's `Ecto.Adapters.Postgres.Connection.ecto_to_db/1` writes
+  into the DDL: Ecto writes `float`, `bigint` or `boolean`, and pg_catalog
+  reports `float8`, `int8` and `bool` back.
   """
 
   @spec from_ash(module(), keyword()) :: String.t()
@@ -71,28 +72,67 @@ defmodule Kumi.Desired.PgType do
     end
   end
 
+  @doc """
+  Whether `from_ash/2`'s name is the whole column type: whether
+  `ADD COLUMN c <name>` creates the same column Ecto builds from the
+  migration type AshPostgres generates.
+
+  False for every parameterized migration type (`{:decimal, 10, 2}`,
+  `{:vector, 1536}`, `{:varchar, 20}`): the name drops the arguments. An
+  unconstrained decimal is `{:decimal, nil, nil}` (AshPostgres already
+  turns `:arbitrary` into `nil`) and stays exact. Also false for the
+  atoms Ecto expands in DDL — `:string` becomes `varchar(255)`, and
+  `:serial`, `:bigserial` and `:identity` bring a sequence with them —
+  and for anything unrecognised, so an unmapped shape fails closed.
+  Datetime precision is carried and checked separately, see
+  `precision_from_ash/2`.
+  """
+  @spec exact_type?(module(), keyword()) :: boolean()
+  def exact_type?(type, constraints) do
+    type
+    |> AshPostgres.MigrationGenerator.get_migration_type(constraints)
+    |> exact?()
+  end
+
+  defp exact?(atom) when atom in [:string, :serial, :bigserial, :identity], do: false
+  defp exact?(atom) when is_atom(atom), do: true
+  defp exact?({:array, inner}), do: exact?(inner)
+  defp exact?({:decimal, nil, nil}), do: true
+  defp exact?(_parameterized_or_unknown), do: false
+
+  # Every Ecto migration type whose udt_name is not the atom's own name.
+  # An atom missing from here falls back to its name, which is right for
+  # `:text`, `:uuid`, `:date`, `:citext`, `:vector`, ... and fails closed
+  # for anything else: the name never equals a real udt_name, so the column
+  # reports a permanent DANGEROUS type change. `:duration` was the first of
+  # these found (H4); `:time_usec` (an `Ash.Type.Time` with microsecond
+  # precision), `:binary` (`Ash.Type.Binary`, `Term`, `UrlEncodedBinary`)
+  # and `:float` (`Ash.Type.Float`) were the next.
+  @udt_names %{
+    utc_datetime: "timestamp",
+    utc_datetime_usec: "timestamp",
+    naive_datetime: "timestamp",
+    naive_datetime_usec: "timestamp",
+    time_usec: "time",
+    duration: "interval",
+    binary: "bytea",
+    binary_id: "uuid",
+    float: "float8",
+    map: "jsonb",
+    boolean: "bool",
+    smallint: "int2",
+    bigint: "int8",
+    integer: "int4",
+    id: "int4",
+    string: "varchar",
+    bitstring: "varbit",
+    decimal: "numeric"
+  }
+
   defp to_pg_name({:decimal, _precision, _scale}), do: "numeric"
   defp to_pg_name({:decimal, _size, _precision, _scale}), do: "numeric"
   defp to_pg_name({:array, inner}), do: "_#{to_pg_name(inner)}"
-  defp to_pg_name(:utc_datetime), do: "timestamp"
-  defp to_pg_name(:utc_datetime_usec), do: "timestamp"
-  defp to_pg_name(:naive_datetime), do: "timestamp"
-  defp to_pg_name(:naive_datetime_usec), do: "timestamp"
-  defp to_pg_name(:map), do: "jsonb"
-  defp to_pg_name(:boolean), do: "bool"
-
-  # Empirically verified (see precision_from_ash/2 moduledoc): Ecto's
-  # ecto_to_db/1 maps the :duration migration type to "interval", not the
-  # atom's own name. Without this clause the generic atom fallback below
-  # returned "duration", which never equals the real udt_name ("interval")
-  # — a permanent phantom type-change diff on every Ash.Type.Duration
-  # column. That bug at least failed closed (mismatched string ->
-  # classified DANGEROUS), unlike the :date precision bug this module also
-  # fixes — but it is still wrong, and worth fixing outright.
-  defp to_pg_name(:duration), do: "interval"
-  defp to_pg_name(:bigint), do: "int8"
-  defp to_pg_name(:integer), do: "int4"
-  defp to_pg_name(atom) when is_atom(atom), do: Atom.to_string(atom)
+  defp to_pg_name(atom) when is_atom(atom), do: Map.get(@udt_names, atom, Atom.to_string(atom))
 
   # Parameterized types we don't map explicitly: AshPostgres returns them as
   # `{name, arg, ...}` (e.g. `{:vector, 1536}` for `Ash.Type.Vector` with

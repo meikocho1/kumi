@@ -24,13 +24,19 @@ defmodule KumiStorage.Backend.Local do
   # whatever extension the client's filename happened to carry.
   @impl true
   def store(source, _filename, content_type, opts) do
-    root = fetch_root!(opts)
+    root = opts |> fetch_root!() |> Path.expand()
     key = "#{Ash.UUID.generate()}#{ext_for_content_type(content_type)}"
     dest = Path.join(root, key)
 
     with :ok <- File.mkdir_p(root),
          :ok <- write(source, dest) do
       {:ok, key}
+    else
+      # A write that fails partway (ENOSPC, EIO) would otherwise leave a
+      # truncated file at a servable key.
+      error ->
+        File.rm(dest)
+        error
     end
   end
 
@@ -73,6 +79,7 @@ defmodule KumiStorage.Backend.Local do
 
   defp write({:path, source_path}, dest), do: File.cp(source_path, dest)
   defp write({:binary, data}, dest), do: File.write(dest, data)
+  defp write(_other, _dest), do: {:error, :invalid_source}
 
   # The stored extension is derived from the *validated* content type, never
   # from the client-supplied filename — a filename is just a label the

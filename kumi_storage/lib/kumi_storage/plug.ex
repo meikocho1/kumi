@@ -2,12 +2,18 @@ defmodule KumiStorage.Plug do
   @moduledoc """
   Serves stored files by key: `GET <mount>/:key`. Plug-only — no Phoenix
   dependency (blueprint §6 point 7). `mix kumi_storage.install` forwards a
-  host router path to this plug (or prints the snippet to add it by hand).
+  host router path to this plug (or prints the snippet to add it by hand):
 
-  Reads `:backend` and the backend's own opts (everything else under
-  `config :kumi_storage, ...`) from Application config once per request —
-  this plug IS the config-reading boundary; `KumiStorage.Backend.Local`
-  itself never touches Application config (see its moduledoc).
+      forward "/uploads", KumiStorage.Plug,
+        config: {MyApp.Core.Attachment, :__kumi_storage_config__}
+
+  `config: {module, function}` names a zero-arity function returning
+  `{backend, backend_opts}`. The plug calls it on every request, so config
+  set at runtime (e.g. `config/runtime.exs`) applies even though Phoenix
+  runs `init/1` at compile time. The generated Attachment's
+  `__kumi_storage_config__/0` is host code, so it may read
+  `config :kumi_storage, ...`; this plug never reads Application config
+  itself.
 
   404s on a missing file OR a key that resolves outside the backend's
   root (`Backend.path/2` returns `:error` for those) — never lets
@@ -25,12 +31,28 @@ defmodule KumiStorage.Plug do
   import Plug.Conn
 
   @impl true
-  def init(opts), do: opts
+  def init(opts) do
+    case Keyword.fetch(opts, :config) do
+      {:ok, {module, function} = config} when is_atom(module) and is_atom(function) ->
+        config
+
+      _ ->
+        raise ArgumentError, """
+        KumiStorage.Plug needs `config: {module, function}`, a zero-arity \
+        function returning {backend, backend_opts}. mix kumi_storage.install \
+        generates one on your Attachment resource:
+
+            forward "/uploads", KumiStorage.Plug,
+              config: {MyApp.Core.Attachment, :__kumi_storage_config__}
+
+        got: #{inspect(opts)}
+        """
+    end
+  end
 
   @impl true
-  def call(conn, _opts) do
-    backend = Application.fetch_env!(:kumi_storage, :backend)
-    backend_opts = Application.get_all_env(:kumi_storage) |> Keyword.delete(:backend)
+  def call(conn, {module, function}) do
+    {backend, backend_opts} = apply(module, function, [])
 
     with [key] <- conn.path_info,
          {:ok, path} <- backend.path(key, backend_opts),

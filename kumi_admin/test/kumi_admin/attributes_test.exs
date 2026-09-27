@@ -37,7 +37,9 @@ defmodule KumiAdmin.AttributesTest do
       refute :api_secret in fields
     end
 
-    test "forms never accept a sensitive attribute in either direction" do
+    # The inbound side (a sensitive param posted anyway is dropped) is
+    # tested against the save handler in ResourceFormLiveTest.
+    test "form fields never include a sensitive attribute" do
       fields =
         Credential
         |> KumiAdmin.FormFields.for_action(:create)

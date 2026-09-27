@@ -67,18 +67,52 @@ right after resolving the session; an actor-less visit redirects rather
 than rendering. With an actor but restrictive policies, a
 policy-protected resource legitimately comes back empty — the shell
 renders that honestly ("No records visible to you.") instead of crashing,
-and New/Edit/Delete buttons are gated by `Ash.can?`.
+and New/Edit/Delete buttons are gated by `Ash.can?`. The converse bites
+harder: without policies — and a `Kumi.Resource` shorthand has none —
+every account your authentication accepts can read and write everything.
+[`kumi/guides/auth.md`](../kumi/guides/auth.md) shows the two ways to
+narrow that.
 
-Actor handoff does not clobber your session: kumi_admin reads the full
-Plug session and adds its own two keys, so what your `on_mount` hooks
-need (e.g. `ash_authentication_phoenix`'s `user_token`) is still there.
+The actor comes from your cookie session, which kumi_admin never copies.
+It puts only its own `kumi_admin_*` keys (mount path, app, actor pair,
+sign-in/sign-out/register paths, user resource, `:strings` overrides) in
+the `live_session` session, because LiveView signs that map, unencrypted,
+into the page's `data-phx-session` token, and a bearer token like
+`ash_authentication_phoenix`'s `user_token` does not belong in page
+markup. Your `on_mount` hooks still see the cookie session through
+LiveView's own merge; on the connected mount that requires the endpoint
+line `phx.new` generates:
+
+```elixir
+socket "/live", Phoenix.LiveView.Socket,
+  websocket: [connect_info: [session: @session_options]]
+```
+
+Options are validated when the router compiles: an unknown key or an
+`:actor` that is not a `{Module, :function}` pair raises `ArgumentError`.
 
 ## Uploads
 
 If [`kumi_storage`](../kumi_storage/) is installed, image fields render as
 uploads automatically. kumi_admin does **not** depend on kumi_storage — it
-detects the generated Attachment resource through two marker functions
-(`__kumi_attachment__/0`, `__kumi_attachment_url__/1`) and nothing else.
+drives the generated Attachment resource through this contract and
+nothing else:
+
+- `__kumi_attachment__/0` marks a `belongs_to` destination as an
+  Attachment, so that field renders as an upload widget.
+- `create :upload` stores a picked file. kumi_admin calls it with four
+  arguments: `source: {:path, tmp_path}`, `filename` and `content_type`
+  (as the browser declared them) and `byte_size` (the temp file's
+  measured size). Field errors on `:byte_size` and `:content_type` are
+  shown as "too large" and "type not accepted".
+- `__kumi_attachment_url__/1` returns a stored record's URL, wherever
+  the admin links to the file.
+
+A file is stored before the parent record is saved. If that save then
+fails, the Attachments stored for it are destroyed again through the
+resource's primary destroy action, when it has one. The widget accepts
+`.jpg .jpeg .png .gif .webp` up to 10 MiB — kumi_storage's defaults; a
+`max_bytes` above that is not reflected in the widget.
 
 ## Dependency contract
 

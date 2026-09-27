@@ -355,7 +355,10 @@ No changes. Database matches application definition.
 
 `kumi.apply` only ever runs operations classified `:safe`, on an explicit
 allowlist, that render to exact SQL — `:review` and `:dangerous` operations
-are printed with a reason and never executed, under any flag.
+are printed with a reason and never executed, under any flag. It also
+refuses to start while a migration is pending or `mix ash.codegen --check`
+would still generate something: if the code is ahead of the snapshot,
+that column is codegen's to add, not Kumi's.
 
 ## Step 7 — An avatar field, via `kumi_storage`
 
@@ -375,9 +378,21 @@ mix kumi_storage.install --yes
 ```
 Notices:
 
+* Kumi: MiniCrm.App already exists — leaving it untouched.
+* Kumi: MiniCrm.Core already exists — leaving it untouched.
 * Kumi Storage: created MiniCrm.Core.Attachment and registered it in
   MiniCrm.Core.
+
+* Kumi Storage: /priv/uploads/ (the default upload root) is in .gitignore.
+  A relative root resolves against the working directory, so in
+  production set an absolute one in config/runtime.exs, e.g.
+
+      config :kumi_storage, root: "/var/lib/my_app/uploads"
+
 * Kumi Storage: mounted file serving at /uploads/:key in MiniCrmWeb.Router.
+  Files there are public to anyone holding the URL: the random key is the
+  only access control, and Ash policies on the Attachment or its parent
+  don't apply to the bytes.
 ```
 
 `MiniCrm.Core.Attachment` is a plain Ash resource (D1 — not a `Kumi.Resource`
@@ -470,7 +485,9 @@ reads the link back through its own `__kumi_attachment_url__/1`. Uploading a
 new file always creates a new Attachment record and re-points the
 relationship — the old one is not deleted (an intentional deferral, see
 below), so replacing an avatar a few times does leave orphaned rows and
-files behind.
+files behind. Those orphaned files stay public at their old `/uploads`
+URL, like every stored file: see "Access control" in
+`kumi_storage/README.md`.
 
 ## Where you still write glue code today
 

@@ -56,9 +56,34 @@ defmodule Kumi.Desired do
         type: PgType.from_ash(attr.type, attr.constraints),
         nullable: attr.allow_nil?,
         default: Default.from_ash(attr.default),
-        datetime_precision: PgType.precision_from_ash(attr.type, attr.constraints)
+        datetime_precision: PgType.precision_from_ash(attr.type, attr.constraints),
+        # A `generated?` attribute's value comes from the database, and a
+        # bare `ADD COLUMN` brings no sequence, identity or generation
+        # expression with it. AshPostgres's `AddAttribute` operation
+        # (deps/ash_postgres/lib/migration_generator/operation.ex) makes a
+        # generated integer with no migration default a `serial`/`bigserial`,
+        # which `PgType` can't see: it only reads the `:bigint` migration type.
+        exact_type?:
+          PgType.exact_type?(attr.type, attr.constraints) and
+            not migration_type_overridden?(resource, attr) and not attr.generated?
       }
     end)
+  end
+
+  # AshPostgres's migration generator lets a resource's `migration_types`
+  # and its repo's `override_migration_type/1` replace the type it would
+  # otherwise generate (`attributes/2` in deps/ash_postgres/lib/
+  # migration_generator/migration_generator.ex). `PgType` reads neither,
+  # so for such a column `type` is not known to be what codegen created.
+  defp migration_type_overridden?(resource, attr) do
+    repo = AshPostgres.DataLayer.Info.repo(resource, :mutate)
+
+    migration_type =
+      AshPostgres.MigrationGenerator.get_migration_type(attr.type, attr.constraints)
+
+    Keyword.has_key?(AshPostgres.DataLayer.Info.migration_types(resource), attr.name) or
+      (Code.ensure_loaded?(repo) and function_exported?(repo, :override_migration_type, 1) and
+         repo.override_migration_type(migration_type) != migration_type)
   end
 
   # Only `belongs_to` relationships own a foreign key column on this
@@ -131,6 +156,8 @@ defmodule Kumi.Desired do
   # INVISIBLE to the diff: a drift in one of those options alone would not
   # be detected. Deliberately not expanding `%Index{}` to carry them in
   # this pass — see the task notes / friction log for the tradeoff.
+  # `exact?` records that loss instead, so `Kumi.Apply` never recreates
+  # such an index as a plain btree.
   defp custom_indexes(resource, table) do
     resource
     |> AshPostgres.DataLayer.Info.custom_indexes()
@@ -138,8 +165,25 @@ defmodule Kumi.Desired do
       %Index{
         name: to_string(index.name || CustomIndex.name(table, index)),
         columns: Enum.map(index.fields, &to_string(CustomIndex.column_name(&1))),
-        unique: index.unique
+        unique: index.unique,
+        exact?: exact_index?(resource, index)
       }
     end)
+  end
+
+  # Everything AshPostgres's `AddCustomIndex` operation (deps/ash_postgres/
+  # lib/migration_generator/operation.ex) puts into the index beyond a name,
+  # uniqueness and a plain column list. A resource base filter becomes a
+  # WHERE clause, and attribute multitenancy prepends the tenant column.
+  # Fields must be atoms, which Ecto quotes as column names: a string is
+  # passed to the DDL as an expression, and `{:desc, field}` carries an
+  # order.
+  defp exact_index?(resource, index) do
+    is_nil(index.where) and is_nil(index.using) and index.include in [nil, []] and
+      index.nulls_distinct != false and is_nil(index.prefix) and
+      not (index.include_base_filter? and
+             not is_nil(AshPostgres.DataLayer.Info.base_filter_sql(resource))) and
+      (index.all_tenants? or Ash.Resource.Info.multitenancy_strategy(resource) != :attribute) and
+      Enum.all?(index.fields, &is_atom/1)
   end
 end

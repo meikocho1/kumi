@@ -42,4 +42,29 @@ defmodule KumiAdmin.FormatTest do
     assert Format.cell(:account_id, uuid) == uuid
     assert Format.cell(:id, uuid) == "d807c77b…"
   end
+
+  describe "record_label/1" do
+    @uuid "d807c77b-e7a2-4ef1-85c6-a267c46805b9"
+
+    test "uses a visible, non-blank :name" do
+      assert Format.record_label(%KumiAdmin.Test.Account{id: @uuid, name: "Acme"}) == "Acme"
+    end
+
+    test "falls back to the truncated id for a blank :name" do
+      assert Format.record_label(%KumiAdmin.Test.Account{id: @uuid, name: ""}) == "d807c77b…"
+    end
+
+    # The label is the show page's heading and every belongs_to <select>
+    # option — the same value the columns and the detail grid hide.
+    test "never uses a sensitive? :name" do
+      patient = Ash.create!(KumiAdmin.Test.Patient, %{name: "Ada"})
+
+      assert Format.record_label(patient) == Format.truncate_id(patient.id)
+    end
+
+    test "never uses a private :name" do
+      assert Format.record_label(%KumiAdmin.Test.Ticket{id: @uuid, name: "internal"}) ==
+               "d807c77b…"
+    end
+  end
 end
