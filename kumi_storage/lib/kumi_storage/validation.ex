@@ -2,7 +2,9 @@ defmodule KumiStorage.Validation do
   @moduledoc """
   v1-mandatory validation at the storage boundary (blueprint §6 point 6):
   a size cap and a content-type allowlist. Call this BEFORE
-  `KumiStorage.Backend.store/4` — the backend itself does not validate.
+  `KumiStorage.Backend.store/4` — the backend itself does not validate —
+  with a size measured from the bytes (`KumiStorage.Upload.measure/1`),
+  never one the client declares.
   """
 
   # Sensible image defaults, both overridable via opts.

@@ -21,8 +21,9 @@ The installer composes `mix kumi.install` and then does three things:
 
 1. Generates `lib/<app>/core/attachment.ex` — an ordinary
    `Ash.Resource` storing uploaded-file metadata, with an `:upload` action
-   (validation + backend `store/4`) and a `__kumi_attachment_url__/1` URL
-   function. Registered in `<App>.Core`.
+   (`KumiStorage.Upload.prepare/3`: validation, then backend `store/4`)
+   and a `__kumi_attachment_url__/1` URL function. Registered in
+   `<App>.Core`.
 2. Adds `config :kumi_storage, backend: KumiStorage.Backend.Local, root:
    "priv/uploads"` if nothing is configured yet.
 3. Forwards a router path to `KumiStorage.Plug`, or prints the snippet if
@@ -56,6 +57,29 @@ the backend is called — backends do not validate.
 |---|---|---|
 | Size cap | 10 MB | `:max_bytes` |
 | Content-type allowlist | `image/jpeg`, `image/png`, `image/gif`, `image/webp` | `:allowed_content_types` |
+
+The generated `:upload` action gets there through
+`KumiStorage.Upload.prepare/3`, which:
+
+- measures the size from the bytes themselves. A `:byte_size` the caller
+  declares is ignored, so a false one can't get past the cap or be saved.
+- calls the backend's `store/4` only once the action runs, after
+  authorization. Building the changeset (a form validate, `Ash.can?/3`)
+  stores nothing, and a caller your policies forbid never writes a file.
+- deletes the stored file if the create fails after that.
+- reports a backend failure as a fixed "upload failed" error and logs the
+  reason, so backend internals never reach the caller.
+
+The content type is the caller's claim; see [Serving](#serving) for how
+it is contained. The destroy action deletes the file only after the
+transaction commits, and logs a delete that fails.
+
+Both calls are library functions made from your plain Ash resource, so
+fixes to them arrive with a dependency upgrade. An Attachment generated
+before `KumiStorage.Upload` existed still has the old inline change
+bodies, because the installer never overwrites the file: replace its
+`:upload` and `:destroy` actions with the ones the installer generates
+now.
 
 ## Backends
 

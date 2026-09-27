@@ -87,6 +87,20 @@ defmodule KumiStorage.Backend.LocalTest do
       assert MIME.from_path(path) == "application/octet-stream"
     end
 
+    test "a source of any other shape is an error, not a crash", %{opts: opts, root: root} do
+      assert Local.store("/etc/passwd", "a.png", "image/png", opts) == {:error, :invalid_source}
+      assert File.ls!(root) == []
+    end
+
+    # Reading /proc/self/mem fails with EIO after both files are open — a
+    # real write failure partway through, which Linux gives us for free.
+    if File.exists?("/proc/self/mem") do
+      test "a write that fails partway leaves no file at the key", %{opts: opts, root: root} do
+        assert {:error, :eio} = Local.store({:path, "/proc/self/mem"}, "a.png", "image/png", opts)
+        assert File.ls!(root) == []
+      end
+    end
+
     test "each allowlisted content type maps to its expected extension", %{opts: opts} do
       for {content_type, expected_ext} <- %{
             "image/jpeg" => ".jpg",

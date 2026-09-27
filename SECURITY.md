@@ -43,10 +43,15 @@ If you're looking for where the interesting surface is:
 - **`Kumi.Plan.Safety`** must fail closed: an unrecognised type change is
   classified DANGEROUS rather than assumed harmless. A case where it
   fails *open* is a security issue.
-- **`kumi_storage`**'s upload path validates content type and size and
-  rejects path traversal in filenames; its `Plug` serves files by
-  generated key only. Traversal, unrestricted type acceptance, or reading
-  outside the configured root are in scope.
+- **`kumi_storage`**'s upload path measures the size from the actual
+  bytes and checks it and the content type before anything is stored, and
+  stores only once the action runs, after authorization. The content type
+  is the caller's claim: the stored extension is derived from it and every
+  response carries `nosniff`, so an upload accepted as `image/png` is never
+  served as HTML. The client filename is never used to build a path, and
+  the `Plug` serves only keys that resolve inside the configured root.
+  Traversal, unrestricted type acceptance, or reading outside the
+  configured root are in scope.
 - **`kumi_admin`** deliberately has no authentication of its own — it
   consumes the host application's `on_mount` hooks and actor. Reads that
   bypass the host's Ash policies, or a rendered value escaping HTML

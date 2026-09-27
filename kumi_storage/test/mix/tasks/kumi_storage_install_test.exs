@@ -27,7 +27,7 @@ defmodule Mix.Tasks.KumiStorage.InstallTest do
   """
 
   describe "Attachment resource generation" do
-    test "creates lib/my_app/core/attachment.ex with the marker fn and destroy after_action" do
+    test "creates lib/my_app/core/attachment.ex with the marker fn and destroy after_transaction" do
       igniter =
         test_project(app_name: :my_app)
         |> Igniter.compose_task("kumi_storage.install", [])
@@ -49,13 +49,15 @@ defmodule Mix.Tasks.KumiStorage.InstallTest do
 
       assert content =~ "destroy :destroy do"
       assert content =~ ~r/require_atomic\?\(?\s*false\)?/
-      assert content =~ "backend.delete(record.storage_key"
+      assert content =~ ~r/change\(?\s*after_transaction\(fn _changeset, result, _context ->/
+      assert content =~ "KumiStorage.Upload.delete_stored(result, backend, backend_opts)"
+      refute content =~ "after_action"
       assert content =~ "attribute :storage_key, :string"
       assert content =~ "attribute :content_type, :string"
       assert content =~ "attribute :byte_size, :integer"
     end
 
-    test "generates the :upload create action calling Validation then the backend's store/4" do
+    test "generates the :upload create action delegating to KumiStorage.Upload.prepare/3" do
       igniter =
         test_project(app_name: :my_app)
         |> Igniter.compose_task("kumi_storage.install", [])
@@ -69,12 +71,36 @@ defmodule Mix.Tasks.KumiStorage.InstallTest do
       assert content =~ ~r/argument\(?\s*:source,\s*:term,\s*allow_nil\?:\s*false\)?/
       assert content =~ ~r/argument\(?\s*:filename,\s*:string,\s*allow_nil\?:\s*false\)?/
       assert content =~ ~r/argument\(?\s*:content_type,\s*:string,\s*allow_nil\?:\s*false\)?/
-      assert content =~ ~r/argument\(?\s*:byte_size,\s*:integer,\s*allow_nil\?:\s*false\)?/
-      assert content =~ "KumiStorage.Validation.validate("
-      assert content =~ "backend.store(source, filename, content_type, backend_opts)"
-      assert content =~ "force_change_attribute(:storage_key, storage_key)"
-      assert content =~ ":too_large"
-      assert content =~ ":disallowed_content_type"
+      # Still accepted (kumi_admin sends it), but optional and ignored.
+      assert content =~ ~r/argument\(?\s*:byte_size,\s*:integer\)?\n/
+      assert content =~ "KumiStorage.Upload.prepare(changeset, backend, backend_opts)"
+      # The store moved into prepare/3's hook; the change body no longer
+      # calls the backend or echoes a reason to the caller.
+      refute content =~ "backend.store("
+      refute content =~ "inspect(reason)"
+      refute content =~ "blueprint"
+    end
+
+    test "the generated source parses, and its :upload change calls KumiStorage.Upload.prepare" do
+      igniter =
+        test_project(app_name: :my_app)
+        |> Igniter.compose_task("kumi_storage.install", [])
+
+      {_igniter, source, _zipper} =
+        Igniter.Project.Module.find_module!(igniter, MyApp.Core.Attachment)
+
+      ast = source |> Rewrite.Source.get(:content) |> Code.string_to_quoted!()
+
+      {_ast, upload_calls} =
+        Macro.prewalk(ast, [], fn
+          {:create, _, [:upload, [do: body]]} = node, acc ->
+            {node, acc ++ remote_calls(body)}
+
+          node, acc ->
+            {node, acc}
+        end)
+
+      assert {KumiStorage.Upload, :prepare, 3} in upload_calls
     end
 
     test "registers Attachment in the Core domain's resources" do
@@ -192,5 +218,19 @@ defmodule Mix.Tasks.KumiStorage.InstallTest do
                IO.iodata_to_binary(n) =~ "already mounted"
              end)
     end
+  end
+
+  # `{Module, :fun, arity}` for every `Module.fun(...)` call inside `ast`.
+  defp remote_calls(ast) do
+    {_ast, calls} =
+      Macro.prewalk(ast, [], fn
+        {{:., _, [{:__aliases__, _, parts}, fun]}, _, args} = node, acc when is_list(args) ->
+          {node, [{Module.concat(parts), fun, length(args)} | acc]}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    calls
   end
 end
