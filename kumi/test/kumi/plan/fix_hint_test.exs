@@ -41,6 +41,20 @@ defmodule Kumi.Plan.FixHintTest do
       assert idx_sql =~
                ~s{CREATE UNIQUE INDEX "crm_accounts_email_index" ON "crm_accounts" ("email");}
     end
+
+    test "an inexact column type or index gets no SQL, since it would build something else" do
+      col = %Column{name: "amount", type: "numeric", nullable: true, exact_type?: false}
+      idx = %Index{name: "crm_deals_open_index", columns: ["stage"], unique: false, exact?: false}
+
+      for op <- [{:add_column, "crm_deals", col}, {:add_index, "crm_deals", idx}] do
+        [codegen, fallback] = FixHint.lines(op)
+
+        assert codegen =~ "mix ash.codegen"
+        assert fallback =~ "recreate it from the resource definition"
+        refute fallback =~ "ALTER TABLE"
+        refute fallback =~ "CREATE INDEX"
+      end
+    end
   end
 
   describe "change_column SQL targets the DESIRED value ({field, desired, actual})" do

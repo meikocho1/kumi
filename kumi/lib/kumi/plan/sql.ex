@@ -8,6 +8,13 @@ defmodule Kumi.Plan.SQL do
   module's moduledoc) both call this, so hint text and executed SQL can
   never drift apart.
 
+  "Exact" is relative to what a `Kumi.Schema` struct records. A column
+  whose `exact_type?` is false (`numeric(10,2)`, `vector(1536)`) or an
+  index whose `exact?` is false (`where`, `using`, `include`) still
+  renders, but the statement would build a different object than
+  `mix ash.codegen` does; `Kumi.Plan.FixHint` and `Kumi.Apply` both refuse
+  to offer or run it.
+
   Renderability is NOT executability: this module renders SQL for
   destructive ops too (`remove_column`, `drop_table`, ...) because
   `FixHint` shows that SQL to a human. Whether an op is safe to run is

@@ -115,6 +115,8 @@ defmodule Kumi.Plan.Locale do
       hint_code_ahead_sql: "if codegen emits nothing, the DB drifted — apply manually: %{sql}",
       hint_code_ahead_manual:
         "if codegen emits nothing, the DB drifted — adjust manually (default/precision changes have no single SQL form)",
+      hint_code_ahead_inexact:
+        "if codegen emits nothing, the DB drifted — recreate it from the resource definition (its type modifiers or index options have no exact SQL form here)",
       hint_primary_key_drift:
         "if codegen emits nothing, primary key drifted (DB: %{actual}, code: %{desired}) — changing it needs DROP CONSTRAINT <table>_pkey + ADD CONSTRAINT ... PRIMARY KEY (...); apply manually, verify data implications first",
       hint_fk_drift:
@@ -189,6 +191,8 @@ defmodule Kumi.Plan.Locale do
       hint_code_ahead_sql: "codegen が何も出さない場合、DB がドリフトしています — 手で適用してください: %{sql}",
       hint_code_ahead_manual:
         "codegen が何も出さない場合、DB がドリフトしています — 手で調整してください（default と精度の変更に単一の SQL 形はありません）",
+      hint_code_ahead_inexact:
+        "codegen が何も出さない場合、DB がドリフトしています — リソース定義から作り直してください（型の修飾子やインデックスのオプションは、ここでは正確な SQL にできません）",
       hint_primary_key_drift:
         "codegen が何も出さない場合、主キーがドリフトしています（DB: %{actual}、コード: %{desired}）— 変更には DROP CONSTRAINT <table>_pkey と ADD CONSTRAINT ... PRIMARY KEY (...) が必要です。データへの影響を確かめてから手で適用してください",
       hint_fk_drift:

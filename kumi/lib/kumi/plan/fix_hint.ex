@@ -121,6 +121,15 @@ defmodule Kumi.Plan.FixHint do
     ]
   end
 
+  # A column type with modifiers, or an index with options, renders to SQL
+  # that builds a different object than `mix ash.codegen` does — the same
+  # reason `Kumi.Apply` refuses to run it — so no SQL is offered here either.
+  defp code_ahead_lines({:add_column, _table, %{exact_type?: false}}, locale),
+    do: [codegen_line(locale), t(locale, :hint_code_ahead_inexact)]
+
+  defp code_ahead_lines({:add_index, _table, %{exact?: false}}, locale),
+    do: [codegen_line(locale), t(locale, :hint_code_ahead_inexact)]
+
   defp code_ahead_lines(op, locale) do
     fallback =
       case SQL.render(op) do
