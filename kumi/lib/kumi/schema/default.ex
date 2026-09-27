@@ -64,9 +64,9 @@ defmodule Kumi.Schema.Default do
 
   # `default %{}` is stored by AshPostgres as `'{}'::jsonb`.
   def from_ash(value) when is_map(value) and not is_struct(value) do
-    case Jason.encode(value) do
+    case encode_json(value) do
       {:ok, json} -> {:literal, json}
-      {:error, _} -> {:literal, inspect(value)}
+      _error -> {:literal, inspect(value)}
     end
   end
 
@@ -79,5 +79,14 @@ defmodule Kumi.Schema.Default do
     if String.Chars.impl_for(value),
       do: {:literal, to_string(value)},
       else: {:literal, inspect(value)}
+  end
+
+  # Jason returns `{:error, _}` only for a value it has no encoder for. A
+  # key goes through `String.Chars.to_string/1` instead, which raises for a
+  # tuple or map key (`%{{:a, :b} => 1}`) and for a list key (`%{[:a] => 1}`).
+  defp encode_json(value) do
+    Jason.encode(value)
+  rescue
+    _exception -> :error
   end
 end

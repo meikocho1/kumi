@@ -82,6 +82,14 @@ defmodule Kumi.Schema.DefaultTest do
       assert Default.from_ash(%{a: {1, 2}}) == {:literal, "%{a: {1, 2}}"}
     end
 
+    # Jason raises, rather than returning an error, for a key it can't
+    # turn into a string.
+    test "a map default whose keys aren't JSON keys is inspected rather than raising" do
+      assert Default.from_ash(%{{:a, :b} => 1}) == {:literal, "%{{:a, :b} => 1}"}
+      assert Default.from_ash(%{[:a] => 1}) == {:literal, "%{[:a] => 1}"}
+      assert Default.from_ash(%{"a" => %{%{} => 1}}) == {:literal, ~s(%{"a" => %{%{} => 1}})}
+    end
+
     test "a list default is a literal, whatever it holds" do
       assert Default.from_ash([]) == {:literal, "[]"}
       assert Default.from_ash([:a]) == {:literal, "[:a]"}
