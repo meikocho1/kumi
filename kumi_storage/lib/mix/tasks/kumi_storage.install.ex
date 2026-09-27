@@ -136,8 +136,10 @@ if Code.ensure_loaded?(Igniter) do
         # trust boundary. `source` is a tagged tuple — `{:path, tmp_path}`
         # (what a Plug.Upload/LiveView upload entry hands you) or
         # `{:binary, data}`. `KumiStorage.Upload.prepare/3` measures and
-        # validates it, and stores it only once the action runs (after
-        # authorization); a create that fails after that deletes the file.
+        # validates it, and stores it only once the action runs, after the
+        # policies Ash can check up front. A create that fails after that,
+        # e.g. on a filter policy Ash checks on the inserted row, deletes
+        # the file.
         create :upload do
           accept []
 

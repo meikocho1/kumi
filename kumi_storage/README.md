@@ -67,10 +67,14 @@ The generated `:upload` action gets there through
 
 - measures the size from the bytes themselves. A `:byte_size` the caller
   declares is ignored, so a false one can't get past the cap or be saved.
-- calls the backend's `store/4` only once the action runs, after
-  authorization. Building the changeset (a form validate, `Ash.can?/3`)
-  stores nothing, and a caller your policies forbid never writes a file.
-- deletes the stored file if the create fails after that.
+- calls the backend's `store/4` only once the action runs, inside the
+  transaction, after the policies Ash can check up front. Building the
+  changeset (a form validate, `Ash.can?/3`) stores nothing, and a caller
+  those policies forbid never writes a file.
+- deletes the stored file if the create fails after that. That includes a
+  filter policy such as `authorize_if expr(owner_id == ^actor(:id))`: Ash
+  checks it against the inserted row, so the file is written first, then
+  the create is rolled back and the file deleted.
 - reports a backend failure as a fixed "upload failed" error and logs the
   reason, so backend internals never reach the caller.
 

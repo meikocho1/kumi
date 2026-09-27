@@ -4,6 +4,7 @@ defmodule KumiStorage.Test.Domain do
 
   resources do
     resource KumiStorage.Test.Attachment
+    resource KumiStorage.Test.MnesiaAttachment
   end
 end
 

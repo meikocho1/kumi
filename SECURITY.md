@@ -45,15 +45,17 @@ If you're looking for where the interesting surface is:
   fails *open* is a security issue.
 - **`kumi_storage`**'s upload path measures the size from the actual
   bytes and checks it and the content type before anything is stored, and
-  stores only once the action runs, after authorization. The content type
-  is the caller's claim: the stored extension is derived from it and every
-  response carries `nosniff`, so an upload accepted as `image/png` is never
-  served as HTML. The client filename is never used to build a path, and
-  the `Plug` serves only keys that resolve inside the configured root.
-  Served files are public to anyone holding the URL: the random key is
-  the only access control, and Ash policies do not apply to the bytes.
-  That is documented behaviour, not a vulnerability; a way to guess or
-  enumerate keys is in scope, as are traversal, unrestricted type
+  stores only once the action runs, after the policies Ash can check up
+  front. A filter policy Ash checks against the inserted row runs after
+  the store, and a create it rejects is rolled back and its file deleted.
+  The content type is the caller's claim: the stored extension is derived
+  from it and every response carries `nosniff`, so an upload accepted as
+  `image/png` is never served as HTML. The client filename is never used
+  to build a path, and the `Plug` serves only keys that resolve inside the
+  configured root. Served files are public to anyone holding the URL: the
+  random key is the only access control, and Ash policies do not apply to
+  the bytes. That is documented behaviour, not a vulnerability; a way to
+  guess or enumerate keys is in scope, as are traversal, unrestricted type
   acceptance, or reading outside the configured root.
 - **`kumi_admin`** deliberately has no authentication of its own — it
   consumes the host application's `on_mount` hooks and actor. Reads that

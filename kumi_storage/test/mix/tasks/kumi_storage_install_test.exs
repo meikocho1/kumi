@@ -88,7 +88,7 @@ defmodule Mix.Tasks.KumiStorage.InstallTest do
       assert length(Regex.scan(~r/Application\.fetch_env!/, content)) == 1
     end
 
-    test "the Ets fixture's :upload and :destroy actions are the generated ones, verbatim" do
+    test "the fixtures' :upload and :destroy actions are the generated ones, verbatim" do
       igniter =
         test_project(app_name: :my_app)
         |> Igniter.compose_task("kumi_storage.install", [])
@@ -101,8 +101,12 @@ defmodule Mix.Tasks.KumiStorage.InstallTest do
       fixture =
         Path.expand("../../support/test_attachment.ex", __DIR__) |> File.read!() |> actions()
 
+      mnesia_fixture =
+        Path.expand("../../support/mnesia_attachment.ex", __DIR__) |> File.read!() |> actions()
+
       assert Map.fetch!(fixture, :upload) == Map.fetch!(generated, :upload)
       assert Map.fetch!(fixture, :destroy) == Map.fetch!(generated, :destroy)
+      assert Map.fetch!(mnesia_fixture, :upload) == Map.fetch!(generated, :upload)
     end
 
     test "generates the :upload create action delegating to KumiStorage.Upload.prepare/3" do

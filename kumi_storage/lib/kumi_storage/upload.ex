@@ -43,11 +43,13 @@ defmodule KumiStorage.Upload do
   `:byte_size` argument is ignored.
 
   Nothing is stored while the changeset is only being built (a form
-  validate, `Ash.can?/3`). `backend.store/4` runs in a `before_transaction`
-  hook, which Ash runs after authorization, and sets `storage_key`. If the
-  create fails after that, an `after_transaction` hook deletes the stored
-  file. A backend failure is logged and reported as a fixed
-  "upload failed" error, so backend internals never reach the caller.
+  validate, `Ash.can?/3`). `backend.store/4` runs in a `before_action`
+  hook, which Ash runs after the up-front authorization, and sets
+  `storage_key`. If the create fails after that, including a policy Ash
+  can only check against the inserted row, an `after_transaction` hook
+  deletes the stored file. A backend failure is logged and reported as a
+  fixed "upload failed" error, so backend internals never reach the
+  caller.
   """
   @spec prepare(Ash.Changeset.t(), module(), keyword()) :: Ash.Changeset.t()
   def prepare(changeset, backend, backend_opts) do
@@ -57,19 +59,25 @@ defmodule KumiStorage.Upload do
 
     with {:ok, byte_size} <- measure(source),
          :ok <- Validation.validate(filename, content_type, byte_size, backend_opts) do
+      ref = make_ref()
+
       changeset
       |> Ash.Changeset.force_change_attribute(:filename, filename)
       |> Ash.Changeset.force_change_attribute(:content_type, content_type)
       |> Ash.Changeset.force_change_attribute(:byte_size, byte_size)
-      # before_transaction, not before_action: when the transaction fails,
-      # Ash hands after_transaction hooks the changeset as it was when the
-      # transaction started, so a key set inside it would never be cleaned
-      # up. It also keeps the file copy out of the database transaction.
-      |> Ash.Changeset.before_transaction(fn changeset ->
-        store(changeset, source, filename, content_type, backend, backend_opts)
+      # before_action, not before_transaction: with a before_transaction
+      # hook, Ash raises CannotFilterCreates for any policy it can only check
+      # against the inserted row, such as `expr(owner_id == ^actor(:id))`.
+      # The copy runs inside the transaction as a result.
+      |> Ash.Changeset.before_action(fn changeset ->
+        store(changeset, ref, source, filename, content_type, backend, backend_opts)
       end)
-      |> Ash.Changeset.after_transaction(fn changeset, result ->
-        delete_on_error(changeset, result, backend, backend_opts)
+      # When the transaction fails, Ash hands after_transaction the
+      # changeset from before it started, without the key. So the key goes
+      # in the process dictionary under this ref: Ash runs both hooks in
+      # the same process.
+      |> Ash.Changeset.after_transaction(fn _changeset, result ->
+        delete_on_error(ref, result, backend, backend_opts)
       end)
     else
       {:error, :invalid_source} ->
@@ -108,23 +116,26 @@ defmodule KumiStorage.Upload do
 
   def delete_stored(result, _backend, _backend_opts), do: result
 
-  defp store(changeset, source, filename, content_type, backend, backend_opts) do
+  defp store(changeset, ref, source, filename, content_type, backend, backend_opts) do
     case backend.store(source, filename, content_type, backend_opts) do
-      {:ok, key} -> Ash.Changeset.force_change_attribute(changeset, :storage_key, key)
-      {:error, reason} -> upload_failed(changeset, reason)
+      {:ok, key} ->
+        Process.put({__MODULE__, ref}, key)
+        Ash.Changeset.force_change_attribute(changeset, :storage_key, key)
+
+      {:error, reason} ->
+        upload_failed(changeset, reason)
     end
   end
 
-  defp delete_on_error(changeset, {:error, _} = result, backend, backend_opts) do
-    case Ash.Changeset.get_attribute(changeset, :storage_key) do
-      nil -> :ok
-      key -> delete(key, backend, backend_opts)
+  defp delete_on_error(ref, result, backend, backend_opts) do
+    case {Process.delete({__MODULE__, ref}), result} do
+      {nil, _result} -> :ok
+      {key, {:error, _}} -> delete(key, backend, backend_opts)
+      {_key, _ok} -> :ok
     end
 
     result
   end
-
-  defp delete_on_error(_changeset, result, _backend, _backend_opts), do: result
 
   defp delete(key, backend, backend_opts) do
     case backend.delete(key, backend_opts) do
