@@ -74,8 +74,14 @@ defmodule KumiAdmin.ResourceShowLive do
              "#{socket.assigns.mount_path}/#{KumiAdmin.Slug.for_resource(socket.assigns.resource)}"
          )}
 
-      {:error, _reason} ->
+      # Only a policy denial is "no permission" (M3). Anything else — most
+      # often a foreign key that still references this record — is an
+      # ordinary failure to report, not a bug to raise on.
+      {:error, %Ash.Error.Forbidden{}} ->
         {:noreply, put_flash(socket, :error, t(socket, :forbidden))}
+
+      {:error, _reason} ->
+        {:noreply, put_flash(socket, :error, t(socket, :delete_failed))}
     end
   end
 

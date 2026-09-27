@@ -109,7 +109,7 @@ defmodule KumiAdmin.Test.MarkerOnly do
 end
 
 defmodule KumiAdmin.Test.Attachment do
-  @moduledoc "Fixture standing in for a host-generated `kumi_storage` Attachment resource — carries the `__kumi_attachment__/0` and `__kumi_attachment_url__/1` marker contract (blueprint §6 points 3 and 9)."
+  @moduledoc "Fixture standing in for a host-generated `kumi_storage` Attachment resource — carries the `__kumi_attachment__/0` and `__kumi_attachment_url__/1` marker contract (blueprint §6 points 3 and 9) and the `:upload` action kumi_admin calls."
 
   use Ash.Resource,
     domain: KumiAdmin.Test.Domain,
@@ -121,11 +121,54 @@ defmodule KumiAdmin.Test.Attachment do
 
   actions do
     defaults [:read, :destroy, create: :*, update: :*]
+
+    # The shape `mix kumi_storage.install` generates — same action name,
+    # same four arguments, same field errors — minus the storage backend,
+    # with a 1_000-byte cap so a test can trip it. A filename starting
+    # with "backend-fails" stands in for `backend.store/4` erroring.
+    create :upload do
+      accept []
+
+      argument :source, :term, allow_nil?: false
+      argument :filename, :string, allow_nil?: false
+      argument :content_type, :string, allow_nil?: false
+      argument :byte_size, :integer, allow_nil?: false
+
+      change fn changeset, _context ->
+        {:path, path} = Ash.Changeset.get_argument(changeset, :source)
+        filename = Ash.Changeset.get_argument(changeset, :filename)
+        content_type = Ash.Changeset.get_argument(changeset, :content_type)
+        byte_size = Ash.Changeset.get_argument(changeset, :byte_size)
+
+        cond do
+          byte_size > 1_000 ->
+            Ash.Changeset.add_error(changeset, field: :byte_size, message: "is too large")
+
+          not String.starts_with?(content_type, "image/") ->
+            Ash.Changeset.add_error(changeset,
+              field: :content_type,
+              message: "is not an allowed content type"
+            )
+
+          String.starts_with?(filename, "backend-fails") ->
+            Ash.Changeset.add_error(changeset, message: "upload failed: :enospc")
+
+          true ->
+            changeset
+            |> Ash.Changeset.force_change_attribute(:filename, filename)
+            |> Ash.Changeset.force_change_attribute(:content_type, content_type)
+            |> Ash.Changeset.force_change_attribute(:byte_size, byte_size)
+            |> Ash.Changeset.force_change_attribute(:storage_key, Path.basename(path))
+        end
+      end
+    end
   end
 
   attributes do
     uuid_primary_key :id
     attribute :filename, :string, public?: true
+    attribute :content_type, :string, public?: true
+    attribute :byte_size, :integer, public?: true
     attribute :storage_key, :string, public?: true
   end
 
@@ -137,7 +180,7 @@ defmodule KumiAdmin.Test.Attachment do
 end
 
 defmodule KumiAdmin.Test.Person do
-  @moduledoc "Fixture Ash resource with a `belongs_to` an Attachment, so upload-widget derivation can be tested against a real relationship."
+  @moduledoc "Fixture Ash resource with a `belongs_to` an Attachment, so upload-widget derivation can be tested against a real relationship. `name` is required, so a submit can fail after its upload was stored."
 
   use Ash.Resource,
     domain: KumiAdmin.Test.Domain,
@@ -153,7 +196,7 @@ defmodule KumiAdmin.Test.Person do
 
   attributes do
     uuid_primary_key :id
-    attribute :name, :string, public?: true
+    attribute :name, :string, public?: true, allow_nil?: false
   end
 
   relationships do

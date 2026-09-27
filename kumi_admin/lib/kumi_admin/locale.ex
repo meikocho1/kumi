@@ -51,11 +51,13 @@ defmodule KumiAdmin.Locale do
       deleted: "Deleted.",
       forbidden: "You don't have permission to do that.",
       fix_errors: "Please fix the errors below.",
+      delete_failed: "Couldn't delete this record.",
 
       # Uploads
       upload_too_large: "File is too large.",
       upload_too_many_files: "Only one file allowed.",
       upload_not_accepted: "File type not accepted.",
+      upload_rejected: "The file couldn't be stored.",
       upload_failed: "Upload error: %{reason}"
     },
     ja: %{
@@ -85,9 +87,11 @@ defmodule KumiAdmin.Locale do
       deleted: "削除しました。",
       forbidden: "その操作の権限がありません。",
       fix_errors: "以下のエラーを修正してください。",
+      delete_failed: "このレコードを削除できませんでした。",
       upload_too_large: "ファイルが大きすぎます。",
       upload_too_many_files: "ファイルは1つだけです。",
       upload_not_accepted: "対応していないファイル形式です。",
+      upload_rejected: "ファイルを保存できませんでした。",
       upload_failed: "アップロードに失敗しました: %{reason}"
     }
   }

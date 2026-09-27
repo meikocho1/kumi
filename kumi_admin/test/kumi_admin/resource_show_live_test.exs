@@ -3,6 +3,90 @@ defmodule KumiAdmin.ResourceShowLiveTest do
 
   alias KumiAdmin.ResourceShowLive
 
+  defmodule Domain do
+    @moduledoc false
+    use Ash.Domain, validate_config_inclusion?: false
+
+    resources do
+      resource KumiAdmin.ResourceShowLiveTest.Undeletable
+      resource KumiAdmin.ResourceShowLiveTest.Referenced
+    end
+  end
+
+  # Readable and creatable, never destroyable.
+  defmodule Undeletable do
+    @moduledoc false
+    use Ash.Resource,
+      domain: Domain,
+      data_layer: Ash.DataLayer.Ets,
+      authorizers: [Ash.Policy.Authorizer]
+
+    ets do
+      private? true
+    end
+
+    actions do
+      defaults [:read, :destroy, create: :*]
+    end
+
+    attributes do
+      uuid_primary_key :id
+    end
+
+    policies do
+      policy action_type(:destroy) do
+        forbid_if always()
+      end
+
+      policy action_type([:read, :create]) do
+        authorize_if always()
+      end
+    end
+  end
+
+  # ETS has no foreign keys, so this destroy refuses the way AshPostgres
+  # reports a row that children still reference: an `Ash.Error.Invalid`
+  # carrying "would leave records behind" on the key.
+  defmodule Referenced do
+    @moduledoc false
+    use Ash.Resource, domain: Domain, data_layer: Ash.DataLayer.Ets
+
+    ets do
+      private? true
+    end
+
+    actions do
+      defaults [:read, create: :*]
+
+      destroy :destroy do
+        primary? true
+        require_atomic? false
+
+        change fn changeset, _context ->
+          Ash.Changeset.add_error(changeset, field: :id, message: "would leave records behind")
+        end
+      end
+    end
+
+    attributes do
+      uuid_primary_key :id
+    end
+  end
+
+  defp delete_socket(record) do
+    %Phoenix.LiveView.Socket{
+      assigns: %{
+        __changed__: %{},
+        flash: %{},
+        record: record,
+        actor: %{id: "someone"},
+        resource: record.__struct__,
+        mount_path: "/admin",
+        text: KumiAdmin.Text.new(KumiAdmin.Test.App)
+      }
+    }
+  end
+
   setup do
     relationship = Ash.Resource.Info.relationship(KumiAdmin.Test.Account, :contacts)
     %{relationship: relationship}
@@ -114,6 +198,26 @@ defmodule KumiAdmin.ResourceShowLiveTest do
 
       assert Phoenix.Flash.get(socket.assigns.flash, :error) ==
                "You don't have permission to do that."
+    end
+  end
+
+  describe "handle_event(\"delete\", ...) failures (M3)" do
+    test "a policy-forbidden destroy flashes the permission message" do
+      record = Ash.create!(Undeletable, %{})
+
+      {:noreply, socket} = ResourceShowLive.handle_event("delete", %{}, delete_socket(record))
+
+      assert Phoenix.Flash.get(socket.assigns.flash, :error) ==
+               "You don't have permission to do that."
+    end
+
+    test "a destroy refused for any other reason (a foreign key) is not reported as forbidden" do
+      record = Ash.create!(Referenced, %{})
+
+      {:noreply, socket} = ResourceShowLive.handle_event("delete", %{}, delete_socket(record))
+
+      assert Phoenix.Flash.get(socket.assigns.flash, :error) == "Couldn't delete this record."
+      assert [_still_there] = Ash.read!(Referenced)
     end
   end
 end

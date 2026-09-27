@@ -91,8 +91,24 @@ Options are validated when the router compiles: an unknown key or an
 
 If [`kumi_storage`](../kumi_storage/) is installed, image fields render as
 uploads automatically. kumi_admin does **not** depend on kumi_storage — it
-detects the generated Attachment resource through two marker functions
-(`__kumi_attachment__/0`, `__kumi_attachment_url__/1`) and nothing else.
+drives the generated Attachment resource through this contract and
+nothing else:
+
+- `__kumi_attachment__/0` marks a `belongs_to` destination as an
+  Attachment, so that field renders as an upload widget.
+- `create :upload` stores a picked file. kumi_admin calls it with four
+  arguments: `source: {:path, tmp_path}`, `filename` and `content_type`
+  (as the browser declared them) and `byte_size` (the temp file's
+  measured size). Field errors on `:byte_size` and `:content_type` are
+  shown as "too large" and "type not accepted".
+- `__kumi_attachment_url__/1` returns a stored record's URL, wherever
+  the admin links to the file.
+
+A file is stored before the parent record is saved. If that save then
+fails, the Attachments stored for it are destroyed again through the
+resource's primary destroy action, when it has one. The widget accepts
+`.jpg .jpeg .png .gif .webp` up to 10 MiB — kumi_storage's defaults; a
+`max_bytes` above that is not reflected in the widget.
 
 ## Dependency contract
 

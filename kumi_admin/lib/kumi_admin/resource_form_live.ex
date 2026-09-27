@@ -6,9 +6,14 @@ defmodule KumiAdmin.ResourceFormLive do
   `accept` list and public attributes, each tagged with an input widget.
 
   Mounted twice by `KumiAdmin.Router`: without `:id` for `.../new`, with
-  `:id` for `.../:id/edit`. Policy-forbidden submits (and any submit error
-  with no field to attach to) render a flash instead of crashing — same
-  honesty stance as the read-only LiveViews.
+  `:id` for `.../:id/edit`. A failed submit renders a flash instead of
+  crashing — "no permission" only for a real policy denial, "fix the
+  errors" otherwise — same honesty stance as the read-only LiveViews.
+
+  Picked files are stored (through the Attachment's `:upload` action)
+  before the submit, because the parent needs the new foreign key. When
+  the submit then fails, the Attachments it stored are destroyed again,
+  and the file has to be picked again.
   """
 
   use Phoenix.LiveView
@@ -58,33 +63,42 @@ defmodule KumiAdmin.ResourceFormLive do
 
   def handle_event("save", %{"form" => params}, socket) do
     case apply_uploads(socket, params) do
-      {:ok, params} ->
-        case AshPhoenix.Form.submit(socket.assigns.form, params: params) do
-          {:ok, record} ->
-            slug = KumiAdmin.Slug.for_resource(socket.assigns.resource)
-            key = if socket.assigns.mode == :new, do: :created, else: :updated
+      {:ok, params, created} -> submit(socket, params, created)
+      {:error, key} -> {:noreply, put_flash(socket, :error, t(socket, key))}
+    end
+  end
 
-            # Whole-phrase templates, not "#{noun} #{verb}." — the noun's
-            # position and the particle after it differ per language.
-            flash =
-              KumiAdmin.Text.string(socket.assigns.text, key,
-                name: KumiAdmin.Text.resource(socket.assigns.text, socket.assigns.resource)
-              )
+  # The half of "save" after the uploads were consumed, split out so it is
+  # testable without a connected upload channel. `created` are the
+  # Attachments this submit stored: when the submit fails nothing
+  # references them, so they are discarded rather than left as orphans
+  # (the user picks the file again either way — the entry is consumed).
+  @doc false
+  def submit(socket, params, created) do
+    case AshPhoenix.Form.submit(socket.assigns.form, params: params) do
+      {:ok, record} ->
+        slug = KumiAdmin.Slug.for_resource(socket.assigns.resource)
+        key = if socket.assigns.mode == :new, do: :created, else: :updated
 
-            {:noreply,
-             socket
-             |> put_flash(:info, flash)
-             |> push_navigate(to: "#{socket.assigns.mount_path}/#{slug}/#{record.id}")}
+        # Whole-phrase templates, not "#{noun} #{verb}." — the noun's
+        # position and the particle after it differ per language.
+        flash =
+          KumiAdmin.Text.string(socket.assigns.text, key,
+            name: KumiAdmin.Text.resource(socket.assigns.text, socket.assigns.resource)
+          )
 
-          {:error, form} ->
-            {:noreply,
-             socket
-             |> put_flash(:error, t(socket, submit_error_key(form)))
-             |> assign(form: form)}
-        end
+        {:noreply,
+         socket
+         |> put_flash(:info, flash)
+         |> push_navigate(to: "#{socket.assigns.mount_path}/#{slug}/#{record.id}")}
 
-      {:error, key} ->
-        {:noreply, put_flash(socket, :error, t(socket, key))}
+      {:error, form} ->
+        discard_attachments(created, socket.assigns.actor)
+
+        {:noreply,
+         socket
+         |> put_flash(:error, t(socket, submit_error_key(form)))
+         |> assign(form: form)}
     end
   end
 
@@ -93,11 +107,23 @@ defmodule KumiAdmin.ResourceFormLive do
   # with no upload fields simply never gets the key at all. The template
   # reads it defensively (`Map.get(assigns, :uploads, %{})`) rather than
   # `@uploads`, which would raise for that case.
-  defp allow_uploads(socket) do
+  #
+  # `max_file_size` is KumiStorage.Validation's default `max_bytes`,
+  # restated here because kumi_admin does not depend on kumi_storage —
+  # LiveView's own default (8_000_000) would reject files storage
+  # accepts. It is a ceiling: a host that lowers `max_bytes` is enforced
+  # by the `:upload` action; one that raises it above this is not
+  # reflected in the widget.
+  @doc false
+  def allow_uploads(socket) do
     socket.assigns.fields
     |> Enum.filter(&match?({:upload, _}, &1.widget))
     |> Enum.reduce(socket, fn %{widget: {:upload, relationship}}, socket ->
-      allow_upload(socket, relationship.name, accept: @upload_extensions, max_entries: 1)
+      allow_upload(socket, relationship.name,
+        accept: @upload_extensions,
+        max_entries: 1,
+        max_file_size: 10 * 1024 * 1024
+      )
     end)
   end
 
@@ -108,24 +134,28 @@ defmodule KumiAdmin.ResourceFormLive do
   # untouched (no new file picked) is simply absent from `params`, so an
   # existing attachment on edit is left as-is — replacing it is the only
   # way to change it, and the old attachment is then an intentional
-  # orphan (blueprint §6 point 9's documented deferral).
+  # orphan (blueprint §6 point 9's documented deferral). Returns the
+  # Attachments it created so a failed submit can discard them; a failed
+  # upload discards the ones stored before it.
   defp apply_uploads(socket, params) do
     socket.assigns.fields
     |> Enum.filter(&match?({:upload, _}, &1.widget))
-    |> Enum.reduce_while({:ok, params}, fn %{
-                                             attribute: attribute,
-                                             widget: {:upload, relationship}
-                                           },
-                                           {:ok, params} ->
+    |> Enum.reduce_while({:ok, params, []}, fn %{
+                                                 attribute: attribute,
+                                                 widget: {:upload, relationship}
+                                               },
+                                               {:ok, params, created} ->
       case consume_upload(socket, relationship) do
         {:ok, nil} ->
-          {:cont, {:ok, params}}
+          {:cont, {:ok, params, created}}
 
         {:ok, attachment} ->
-          {:cont, {:ok, Map.put(params, Atom.to_string(attribute.name), attachment.id)}}
+          params = Map.put(params, Atom.to_string(attribute.name), attachment.id)
+          {:cont, {:ok, params, [attachment | created]}}
 
-        {:error, message} ->
-          {:halt, {:error, message}}
+        {:error, key} ->
+          discard_attachments(created, socket.assigns.actor)
+          {:halt, {:error, key}}
       end
     end)
   end
@@ -135,35 +165,83 @@ defmodule KumiAdmin.ResourceFormLive do
 
     result =
       consume_uploaded_entries(socket, relationship.name, fn %{path: path}, entry ->
-        {:ok,
-         Ash.create(
-           relationship.destination,
-           %{
-             source: {:path, path},
-             filename: entry.client_name,
-             content_type: entry.client_type,
-             byte_size: entry.client_size
-           },
-           action: :upload,
-           actor: actor
-         )}
+        {:ok, upload_attachment(relationship.destination, path, entry, actor)}
       end)
 
     case result do
       [] -> {:ok, nil}
-      [{:ok, attachment} | _] -> {:ok, attachment}
-      [{:error, _reason} | _] -> {:error, :forbidden}
+      [first | _] -> first
     end
   end
 
-  # A submit failure with no field-attributable errors is, in practice, a
-  # policy-forbidden action rather than bad input — AshPhoenix.Form only
-  # attaches errors to fields it recognizes from the changeset/query.
-  defp submit_error_key(form) do
-    case AshPhoenix.Form.errors(form) do
-      [] -> :forbidden
-      _ -> :fix_errors
+  # Stores one consumed upload entry through `destination`'s `:upload`
+  # action — the admin's whole side of that contract, public so it is
+  # testable against a real action. Runs inside the consume callback,
+  # while the temp file at `path` exists, so `byte_size` is the file's
+  # measured size, not the browser's `client_size`. `filename` and
+  # `content_type` are still what the browser declared; the action is the
+  # trust boundary for those.
+  @doc false
+  def upload_attachment(destination, path, entry, actor) do
+    destination
+    |> Ash.create(
+      %{
+        source: {:path, path},
+        filename: entry.client_name,
+        content_type: entry.client_type,
+        byte_size: File.stat!(path).size
+      },
+      action: :upload,
+      actor: actor
+    )
+    |> case do
+      {:ok, attachment} -> {:ok, attachment}
+      {:error, error} -> {:error, upload_error_key(error)}
     end
+  end
+
+  # Only a policy denial is "no permission" (M3). The `:upload` action
+  # reports its own size and content-type rejections as field errors on
+  # `:byte_size` / `:content_type`; anything else it refused is
+  # `:upload_rejected`, not a permission problem.
+  defp upload_error_key(%Ash.Error.Forbidden{}), do: :forbidden
+
+  defp upload_error_key(%Ash.Error.Invalid{errors: errors}) do
+    cond do
+      Enum.any?(errors, &match?(%{field: :byte_size}, &1)) -> :upload_too_large
+      Enum.any?(errors, &match?(%{field: :content_type}, &1)) -> :upload_not_accepted
+      true -> :upload_rejected
+    end
+  end
+
+  defp upload_error_key(_error), do: :upload_rejected
+
+  # Best-effort cleanup of Attachments nothing references. Destroy is not
+  # part of the marker/`:upload`/URL contract, hence the guard; the
+  # generated primary destroy also deletes the stored file. The result is
+  # ignored — the failure the user needs to hear about is the submit's.
+  defp discard_attachments(created, actor) do
+    Enum.each(created, fn %resource{} = attachment ->
+      if Ash.Resource.Info.primary_action(resource, :destroy) do
+        Ash.destroy(attachment, actor: actor)
+      end
+    end)
+  end
+
+  # Only an actual policy denial is "no permission" (M3). Everything else —
+  # a field error, a constraint the data layer reported, a change that
+  # refused the input — is the form's to fix. The errors AshPhoenix keeps
+  # are the ones inside the error class, so the check is on each one's
+  # `class`, not on an `%Ash.Error.Forbidden{}` wrapper.
+  defp submit_error_key(form) do
+    forbidden? =
+      form
+      |> AshPhoenix.Form.raw_errors(for_path: :all)
+      |> Map.values()
+      |> List.flatten()
+      |> Enum.any?(&match?(%{class: :forbidden}, &1))
+
+    if forbidden?, do: :forbidden, else: :fix_errors
   end
 
   defp load_form(socket, id) do
