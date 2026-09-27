@@ -79,10 +79,10 @@ Ordinary Ash source you can read and edit — this is D1, not a wrapper.
 Run it with `--dry-run` first and you'll see exactly this:
 
 **1. A `UserIdentity` resource**, if you don't already have one. Every
-OAuth2 strategy needs it: only the provider's `iss`/`sub` pair identifies
-a returning user stably, and matching on email address is not safe.
-Generated with the Postgres table, the policy bypass and the domain
-registration already wired.
+OAuth2 strategy needs it: it records the provider's `iss`/`sub` pair
+against each user. It does not decide which user a sign-in lands on —
+see 3. Generated with the Postgres table, the policy bypass and the
+domain registration already wired.
 
 **2. The strategy block**, inserted into your existing `authentication do
 strategies do` rather than appended as a second one:
@@ -108,6 +108,23 @@ assumed:
 
 `upsert_fields []` is deliberate: signing in again must not overwrite the
 local record from the provider profile.
+
+A returning user is matched **by email**, through your `:unique_email`
+identity: whoever the provider says owns `alice@example.com` gets the
+local `alice@example.com` account, including one that was registered
+with a password. That is only safe when the provider vouches for the
+address, so the action carries two guards:
+
+- **Verified email.** The action rejects the sign-in unless the
+  provider's `user_info` has `email_verified: true`. Google and GitHub
+  always send it. A generic OIDC provider may not — Microsoft Entra ID
+  doesn't by default — and then every sign-in fails until it does. That
+  failure is the point: don't delete the check to make sign-in work.
+- **Unconfirmed account.** With the confirmation add-on, it refuses to
+  sign in to an existing account whose `confirmed_at` is still `nil`:
+  someone registered that address and never proved they own it, and
+  may know its password. This is the `after_action` from
+  `ash_authentication`'s own 4.x OAuth2 tutorials.
 
 **4. `secret_for/4` clauses** on your `Secrets` module, reading from
 application env. No credential is ever written into source.
@@ -220,5 +237,9 @@ to parse (`kumi/test/kumi/auth/codegen_test.exs`).
 credentials from Google and GitHub, which this repository does not have,
 so nobody here has watched a browser complete a callback. The
 provider-specific option names come from `ash_authentication`'s own
-tutorials. Run the flow against your own provider before shipping, and
-treat a working `mix compile` as necessary but not sufficient.
+tutorials, and the `email_verified` claim the verified-email guard reads
+was checked against the source of Assent (the library its OAuth2
+strategies are built on), not a live callback. The guards themselves are
+unit tested as code. Run the flow against your own provider before
+shipping, and treat a working `mix compile` as necessary but not
+sufficient.
