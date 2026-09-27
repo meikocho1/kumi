@@ -61,10 +61,15 @@ tag they collapse into that version's section.
   undeletable) and never rendered as SQL, since repairing it means DROP
   plus ADD.
 - `mix kumi.apply` repairs SAFE drift in development. Four independent
-  gates: the operation must be classified SAFE, must be on an explicit
-  allowlist, must render to exact SQL, and must not carry a default or
-  precision change. It runs in one transaction, re-introspects afterwards
-  to verify the result, and refuses to run outside `MIX_ENV=dev`.
+  gates: the operation must be classified SAFE, must have an allowlisted
+  shape (a nullable `add_column`, a non-unique `add_index`, or a
+  `change_column` that only drops NOT NULL), must render to exact SQL,
+  and must be complete — no default, precision, type modifier
+  (`numeric(10,2)`, `vector(1536)`) or index option (`where`, `using`,
+  `include`) silently dropped. It runs in one transaction, re-introspects
+  afterwards to verify the result, refuses to run outside `MIX_ENV=dev`,
+  and refuses to run while a migration is pending or
+  `mix ash.codegen --check` fails.
 - Fix hints: each diff operation carries a remediation line, favouring
   "add it to your code" over "drop it from the database".
 - `Kumi.App`, a Spark DSL for application-level intent — title,
@@ -199,10 +204,94 @@ tag they collapse into that version's section.
   set; `kumi_new` stays dependency-free so it remains installable as a
   Mix archive.
 
+### Changed
+
+- `KumiStorage.Plug` requires `config: {module, function}` and no longer
+  reads Application config itself (only mix tasks and host code do).
+  `mix kumi_storage.install` generates
+  `<App>.Core.Attachment.__kumi_storage_config__/0` and
+  `forward "/uploads", KumiStorage.Plug, config: {<App>.Core.Attachment,
+  :__kumi_storage_config__}`. An Attachment generated earlier keeps its
+  old inline change bodies, because the installer never overwrites it:
+  replace its `:upload`/`:destroy` actions with the current generated
+  ones, add `__kumi_storage_config__/0`, and add `config:` to the router
+  forward (the plug raises at compile time without it).
+- The generated `:upload` action measures the size from the bytes; the
+  declared `byte_size` argument is now optional and ignored.
+- `use Kumi.Resource` accepts exactly `domain:`, `repo:` and `table:`. An
+  unknown option (`extensions:`, a typo like `tabel:`), a repeated one or
+  a missing one raises a readable `ArgumentError` instead of being
+  dropped silently or failing with a bare `KeyError`.
+- `kumi_admin/2` validates its options when the router compiles: an
+  unknown key, or an `:actor` that is not a `{Module, :function}` pair,
+  raises `ArgumentError`.
+
+### Security
+
+- The admin's LiveView session no longer carries a copy of the cookie
+  session. Values such as ash_authentication's `user_token` and the CSRF
+  token were signed — not encrypted — into the page's `data-phx-session`
+  token, readable by any script on the page. `on_mount` hooks still see
+  the cookie session through LiveView's own merge, which needs the
+  endpoint's `socket "/live", Phoenix.LiveView.Socket, websocket:
+  [connect_info: [session: @session_options]]` (phx.new generates it).
+- `mix kumi.gen.auth` register actions reject a sign-in unless the
+  provider marks the email `email_verified` (google, github and oidc;
+  fails closed). With the confirmation add-on they also refuse to link an
+  existing account that was never confirmed. Before, an attacker who
+  controlled an unverified provider account with a victim's email could
+  sign in as the victim. Actions generated earlier are not rewritten;
+  re-check your `register_with_<provider>` against `guides/auth.md`.
+  `mix kumi.gen.auth oidc` notes that providers which don't send
+  `email_verified` by default (e.g. Microsoft Entra ID) sign no one in
+  until they do.
+- The generated `:upload` action stored the file while the changeset was
+  being built — before authorization, and on every form validate — and
+  trusted the caller's declared `byte_size`, so the size cap could be
+  bypassed. It now stores only when the action runs, measures the real
+  size, deletes the file when the create fails afterwards, and turns a
+  malformed `:source` into a changeset error instead of a crash. The
+  generated destroy deletes the file after the transaction commits and
+  logs a failed delete instead of discarding it.
+  `KumiStorage.Backend.Local` removes a partially written file.
+- Served uploads are public to anyone holding the URL, which is now
+  stated in the README, `SECURITY.md` and the installer notice; the
+  generated `storage_key` is `public? false`, and the installer adds
+  `/priv/uploads/` to `.gitignore`.
+- The admin no longer uses a `sensitive?` or private `:name` as a
+  record's label, and its create/edit form forwards only the fields it
+  renders: a sensitive attribute or an upload foreign key posted by a
+  client is dropped before it reaches the action.
+- `mix kumi_admin.install` and `mix kumi.new` warn that every account the
+  host's auth accepts is a full admin (shorthand resources carry no
+  policies), and show how to restrict it. `guides/auth.md` no longer
+  suggests the Google `hd` authorize parameter restricts who can sign in.
+
 ### Fixed
 
 Bugs found and fixed during development, listed because each one is a
 trap worth knowing about:
+
+- `mix kumi.plan`, `kumi.apply`, `kumi.report` and `kumi.describe`
+  crashed on a map, list or `{m, f, a}` attribute default (for example
+  `default %{}`). Float, binary/term and microsecond `time` columns
+  showed a permanent DANGEROUS type change on a freshly migrated
+  database. Quoted SQL defaults such as `'it''s'::text` and
+  `'a'::character varying` were misread.
+- `mix kumi.apply` could create a different column or index than
+  `mix ash.codegen` does — `numeric` for `numeric(10,2)`, a plain btree
+  for a partial or GIN index — and then report the repair as verified.
+  Such operations are now skipped (see the gates above).
+- A shorthand module that also declared `code_interface`, `validations`,
+  `changes`, `preparations`, postgres `references`, `custom_indexes`,
+  `check_constraints` or `custom_statements` next to `fields do ... end`,
+  or overrode the postgres `table`/`repo`, compiled silently while
+  `mix kumi.expand` never printed those parts. It now fails to compile.
+- The admin reported every failed save or delete as a permission error.
+  "You don't have permission" now appears only for real policy denials; a
+  delete blocked by a foreign key, and an upload rejected for size or
+  type, say so. When a save fails, the attachments it had just uploaded
+  are destroyed again instead of being orphaned.
 
 - `mix kumi.plan` reported every column with a numeric or boolean default
   as permanent, unrepairable drift. Postgres returns those defaults
