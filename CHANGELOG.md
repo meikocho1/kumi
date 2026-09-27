@@ -215,7 +215,8 @@ tag they collapse into that version's section.
   old inline change bodies, because the installer never overwrites it:
   replace its `:upload`/`:destroy` actions with the current generated
   ones, add `__kumi_storage_config__/0`, and add `config:` to the router
-  forward (the plug raises at compile time without it).
+  forward (the plug raises at compile time without it). Re-running
+  `mix kumi_storage.install` on such a host warns with both lines.
 - The generated `:upload` action measures the size from the bytes; the
   declared `byte_size` argument is now optional and ignored.
 - `use Kumi.Resource` accepts exactly `domain:`, `repo:` and `table:`. An
@@ -242,6 +243,9 @@ tag they collapse into that version's section.
   controlled an unverified provider account with a victim's email could
   sign in as the victim. Actions generated earlier are not rewritten;
   re-check your `register_with_<provider>` against `guides/auth.md`.
+  Without the confirmation add-on only the verified-email guard exists,
+  so a password account pre-registered with someone else's address is
+  still linked to that person's sign-in; the task now says so.
   `mix kumi.gen.auth oidc` notes that providers which don't send
   `email_verified` by default (e.g. Microsoft Entra ID) sign no one in
   until they do.
