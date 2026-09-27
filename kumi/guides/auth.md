@@ -126,6 +126,14 @@ address, so the action carries two guards:
   may know its password. This is the `after_action` from
   `ash_authentication`'s own 4.x OAuth2 tutorials.
 
+Without the confirmation add-on only the first guard exists. If your
+user resource also has a password, anyone can register
+`alice@example.com` with a password before Alice first signs in with the
+provider, and from then on both her sign-in and the stranger's password
+open the same account. `mix kumi.gen.auth` prints a notice when it
+generates an action in that state; add the confirmation add-on (and the
+`after_action` above), or turn off password registration.
+
 **4. `secret_for/4` clauses** on your `Secrets` module, reading from
 application env. No credential is ever written into source.
 

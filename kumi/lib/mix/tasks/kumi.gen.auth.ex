@@ -36,11 +36,13 @@ defmodule Mix.Tasks.Kumi.Gen.Auth.Docs do
       2. The strategy block inside `authentication do strategies do`.
       3. A `register_with_<provider>` upsert action handling both
          registration and sign-in. A returning user is matched by email,
-         through the `:unique_email` identity, and two guards make that
-         safe: the action rejects any address the provider has not marked
-         `email_verified`, and, with the confirmation add-on, it refuses
-         to sign in to an existing account whose email was never
-         confirmed.
+         through the `:unique_email` identity. The action rejects any
+         address the provider has not marked `email_verified`, and, with
+         the confirmation add-on, it refuses to sign in to an existing
+         account whose email was never confirmed. Without that add-on a
+         resource that also has a password is not protected against
+         someone pre-registering another person's address; the task says
+         so when it generates the action.
       4. `secret_for/4` clauses on your `Secrets` module reading from
          application env.
 
@@ -271,6 +273,9 @@ if Code.ensure_loaded?(Igniter) do
       {igniter, confirm?} =
         Ash.Resource.Igniter.defines_attribute(igniter, opts[:user], :confirmed_at)
 
+      {igniter, password?} =
+        Ash.Resource.Igniter.defines_attribute(igniter, opts[:user], :hashed_password)
+
       igniter
       |> Ash.Resource.Igniter.add_new_action(
         opts[:user],
@@ -281,6 +286,9 @@ if Code.ensure_loaded?(Igniter) do
         )
       )
       |> maybe_notice(Kumi.Auth.Codegen.email_verified_notice(name, upsert_identity))
+      |> maybe_notice(
+        Kumi.Auth.Codegen.unconfirmed_notice(name, upsert_identity, confirm?, password?)
+      )
     end
 
     defp maybe_notice(igniter, nil), do: igniter

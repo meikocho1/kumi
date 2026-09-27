@@ -193,6 +193,22 @@ defmodule Kumi.Auth.CodegenTest do
     end
   end
 
+  describe "unconfirmed_notice/4" do
+    test "warns when an email-matched action has a password but no confirmation" do
+      notice = Codegen.unconfirmed_notice(:google, :unique_email, false, true)
+
+      assert notice =~ "register_with_google"
+      assert notice =~ "confirmed_at"
+      assert notice =~ "confirmation add-on"
+    end
+
+    test "nothing to say when confirmation guards it, nothing is matched, or there is no password" do
+      assert Codegen.unconfirmed_notice(:google, :unique_email, true, true) == nil
+      assert Codegen.unconfirmed_notice(:google, nil, false, true) == nil
+      assert Codegen.unconfirmed_notice(:google, :unique_email, false, false) == nil
+    end
+  end
+
   describe "secret_keys/1" do
     test "paths address the strategy inside the authentication DSL" do
       assert [

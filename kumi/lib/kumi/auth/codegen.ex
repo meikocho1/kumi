@@ -191,6 +191,31 @@ defmodule Kumi.Auth.Codegen do
   def email_verified_notice(_provider, _identity), do: nil
 
   @doc """
+  What `mix kumi.gen.auth` says when a register action matches by email
+  but the unconfirmed-account guard could not be generated: the user
+  resource has a password but no `confirmed_at`, so a password account
+  registered with someone else's address is linked to that person's
+  provider sign-in.
+  """
+  @spec unconfirmed_notice(atom(), atom() | nil, boolean(), boolean()) :: String.t() | nil
+  def unconfirmed_notice(provider, identity, confirmed_at?, password?)
+
+  def unconfirmed_notice(provider, identity, false, true) when not is_nil(identity) do
+    """
+    #{provider}: register_with_#{provider} matches a returning user by email,
+    and your user resource has a password but no `confirmed_at`. Nothing
+    stops someone registering alice@example.com with a password before
+    Alice ever signs in with #{provider}: her sign-in then lands in that
+    account, and the stranger's password keeps working.
+
+    Add ash_authentication's confirmation add-on and the unconfirmed-account
+    guard shown in guides/auth.md, or turn off password registration.
+    """
+  end
+
+  def unconfirmed_notice(_provider, _identity, _confirmed_at?, _password?), do: nil
+
+  @doc """
   The application-env keys `Secrets` will read for `provider`, in the
   order `mix kumi.gen.auth` generates `secret_for/4` clauses for them.
   """
