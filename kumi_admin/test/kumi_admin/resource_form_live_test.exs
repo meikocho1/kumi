@@ -96,7 +96,9 @@ defmodule KumiAdmin.ResourceFormLiveTest do
   end
 
   # A create that a change refuses with no field to attach the error to —
-  # the case the old heuristic called "forbidden".
+  # the case the old heuristic called "forbidden". Named "whole form", it
+  # refuses with `fields: []`, which AshPhoenix files under `:_form`: a
+  # form error, but still not one the page renders under a field.
   defmodule Refusing do
     @moduledoc false
     use Ash.Resource, domain: Domain, data_layer: Ash.DataLayer.Ets
@@ -111,7 +113,19 @@ defmodule KumiAdmin.ResourceFormLiveTest do
       create :create do
         primary? true
         accept [:name]
-        change fn changeset, _context -> Ash.Changeset.add_error(changeset, "refused") end
+
+        change fn changeset, _context ->
+          case Ash.Changeset.get_attribute(changeset, :name) do
+            "whole form" ->
+              Ash.Changeset.add_error(
+                changeset,
+                Ash.Error.Changes.InvalidChanges.exception(fields: [], message: "refused")
+              )
+
+            _name ->
+              Ash.Changeset.add_error(changeset, "refused")
+          end
+        end
       end
     end
 
@@ -348,10 +362,18 @@ defmodule KumiAdmin.ResourceFormLiveTest do
       assert attachment.id in attachment_ids()
     end
 
-    test "a refusal with no field to attach to is not reported as forbidden (M3)" do
+    test "a refusal with no field to attach to is neither forbidden (M3) nor 'fix the errors'" do
       {:noreply, socket} = ResourceFormLive.submit(form_socket(Refusing), %{"name" => "x"}, [])
 
-      assert error_flash(socket) == "Please fix the errors below."
+      assert error_flash(socket) == "Couldn't save this record."
+    end
+
+    test "an error on no rendered field is not 'fix the errors below' either" do
+      {:noreply, socket} =
+        ResourceFormLive.submit(form_socket(Refusing), %{"name" => "whole form"}, [])
+
+      assert Keyword.has_key?(socket.assigns.form.errors, :_form)
+      assert error_flash(socket) == "Couldn't save this record."
     end
   end
 

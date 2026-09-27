@@ -8,7 +8,8 @@ defmodule KumiAdmin.ResourceFormLive do
   Mounted twice by `KumiAdmin.Router`: without `:id` for `.../new`, with
   `:id` for `.../:id/edit`. A failed submit renders a flash instead of
   crashing — "no permission" only for a real policy denial, "fix the
-  errors" otherwise — same honesty stance as the read-only LiveViews.
+  errors" only when a field on the form shows one, "couldn't save"
+  otherwise — same honesty stance as the read-only LiveViews.
 
   Picked files are stored (through the Attachment's `:upload` action)
   before the submit, because the parent needs the new foreign key. When
@@ -121,7 +122,7 @@ defmodule KumiAdmin.ResourceFormLive do
 
         {:noreply,
          socket
-         |> put_flash(:error, t(socket, submit_error_key(form)))
+         |> put_flash(:error, t(socket, submit_error_key(form, socket.assigns.fields)))
          |> assign(form: form)}
     end
   end
@@ -252,12 +253,13 @@ defmodule KumiAdmin.ResourceFormLive do
     end)
   end
 
-  # Only an actual policy denial is "no permission" (M3). Everything else —
-  # a field error, a constraint the data layer reported, a change that
-  # refused the input — is the form's to fix. The errors AshPhoenix keeps
-  # are the ones inside the error class, so the check is on each one's
-  # `class`, not on an `%Ash.Error.Forbidden{}` wrapper.
-  defp submit_error_key(form) do
+  # Only an actual policy denial is "no permission" (M3). The errors
+  # AshPhoenix keeps are the ones inside the error class, so the check is
+  # on each one's `class`, not on an `%Ash.Error.Forbidden{}` wrapper.
+  # "Fix the errors below" only when a rendered field shows one — the
+  # template renders nothing else. A refusal with no field there (a
+  # change's field-less error, a data-layer failure) is `:save_failed`.
+  defp submit_error_key(form, fields) do
     forbidden? =
       form
       |> AshPhoenix.Form.raw_errors(for_path: :all)
@@ -265,7 +267,11 @@ defmodule KumiAdmin.ResourceFormLive do
       |> List.flatten()
       |> Enum.any?(&match?(%{class: :forbidden}, &1))
 
-    if forbidden?, do: :forbidden, else: :fix_errors
+    cond do
+      forbidden? -> :forbidden
+      Enum.any?(fields, &(form[&1.attribute.name].errors != [])) -> :fix_errors
+      true -> :save_failed
+    end
   end
 
   defp load_form(socket, id) do

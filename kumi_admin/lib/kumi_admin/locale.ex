@@ -51,6 +51,7 @@ defmodule KumiAdmin.Locale do
       deleted: "Deleted.",
       forbidden: "You don't have permission to do that.",
       fix_errors: "Please fix the errors below.",
+      save_failed: "Couldn't save this record.",
       delete_failed: "Couldn't delete this record.",
 
       # Uploads
@@ -87,6 +88,7 @@ defmodule KumiAdmin.Locale do
       deleted: "削除しました。",
       forbidden: "その操作の権限がありません。",
       fix_errors: "以下のエラーを修正してください。",
+      save_failed: "このレコードを保存できませんでした。",
       delete_failed: "このレコードを削除できませんでした。",
       upload_too_large: "ファイルが大きすぎます。",
       upload_too_many_files: "ファイルは1つだけです。",
