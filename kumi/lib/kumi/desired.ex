@@ -57,9 +57,15 @@ defmodule Kumi.Desired do
         nullable: attr.allow_nil?,
         default: Default.from_ash(attr.default),
         datetime_precision: PgType.precision_from_ash(attr.type, attr.constraints),
+        # A `generated?` attribute's value comes from the database, and a
+        # bare `ADD COLUMN` brings no sequence, identity or generation
+        # expression with it. AshPostgres's `AddAttribute` operation
+        # (deps/ash_postgres/lib/migration_generator/operation.ex) makes a
+        # generated integer with no migration default a `serial`/`bigserial`,
+        # which `PgType` can't see: it only reads the `:bigint` migration type.
         exact_type?:
           PgType.exact_type?(attr.type, attr.constraints) and
-            not migration_type_overridden?(resource, attr)
+            not migration_type_overridden?(resource, attr) and not attr.generated?
       }
     end)
   end

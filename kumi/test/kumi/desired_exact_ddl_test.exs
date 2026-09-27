@@ -64,6 +64,8 @@ defmodule Kumi.DesiredExactDdlTest do
       attribute :code, :string
       attribute :name, :string
       attribute :tags, {:array, :string}
+      attribute :quantity, :integer
+      attribute :ticket_no, :integer, generated?: true
     end
   end
 
@@ -140,6 +142,8 @@ defmodule Kumi.DesiredExactDdlTest do
   defp exact_types(name), do: Map.new(table(name).columns, &{&1.name, &1.exact_type?})
   defp exact_indexes(name), do: Map.new(table(name).indexes, &{&1.name, &1.exact?})
 
+  # `ticket_no` has the same `:bigint` migration type as `quantity`, but
+  # codegen adds it as `bigserial`: int8 with a sequence default.
   test "a column type is exact only when its name is the whole type" do
     assert exact_types("kumi_exact_priced") == %{
              "id" => true,
@@ -148,7 +152,9 @@ defmodule Kumi.DesiredExactDdlTest do
              "embedding" => false,
              "code" => false,
              "name" => true,
-             "tags" => true
+             "tags" => true,
+             "quantity" => true,
+             "ticket_no" => false
            }
   end
 

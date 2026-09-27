@@ -32,12 +32,12 @@ defmodule Kumi.Apply do
        sets no default and no datetime precision, and names the column
        type by its `udt_name` alone, so a `:safe` `add_column` is skipped
        when its `default` or `datetime_precision` is non-nil or its type
-       is not `exact_type?` (`numeric(10,2)`, `vector(1536)`, ...).
-       `Safety.classify/1` only looks at `nullable`, so each of those is
-       still `:safe`, and running it would leave residual drift (the
-       default) or, worse, a different column than `mix ash.codegen`
-       built that no later plan can see (the type). Likewise
-       `CREATE INDEX name ON table (columns)` is only run for an `exact?`
+       is not `exact_type?` (`numeric(10,2)`, `vector(1536)`, a generated
+       `bigserial`, ...). `Safety.classify/1` only looks at `nullable`,
+       so each of those is still `:safe`, and running it would leave
+       residual drift (the default) or, worse, a different column than
+       `mix ash.codegen` built that no later plan can see (the type).
+       Likewise `CREATE INDEX name ON table (columns)` is only run for an `exact?`
        index — one with no `where`, `using`, `include`, expression field
        or other option `Kumi.Schema.Index` can't carry. (Fail-closed here
        also skips one case that would actually round-trip fine — a
@@ -45,6 +45,12 @@ defmodule Kumi.Apply do
        default precision for a new timestamp column — but telling that
        apart from a mismatching case isn't worth the special-casing.)
        Renderable-and-complete is a strictly narrower set than safe.
+
+  An `add_index` that passes all four is still skipped when one of its
+  columns is missing and this run won't add it — its `add_column` (or
+  `possible_rename`) in the same plan was skipped. Postgres drops an index
+  with the column it covers, so the two usually arrive together, and
+  `CREATE INDEX` on the missing column would fail and roll back the rest.
 
   `:review` and `:dangerous` ops are ALWAYS skipped, with a reason, under
   any option — there is no flag that runs them.
@@ -93,38 +99,72 @@ defmodule Kumi.Apply do
   end
 
   @doc """
-  Applies the same four gates `run/3` uses, without executing anything —
+  Applies the same gates `run/3` uses, without executing anything —
   `Mix.Tasks.Kumi.Apply` calls this to print its preview so the printed
   "will run" / "skip" lines can never drift from what `run/3` actually does.
   """
   @spec preview([Plan.entry()]) :: {[executed_entry()], [skipped_entry()]}
   def preview(entries) do
-    {exec, skip} =
-      Enum.reduce(entries, {[], []}, fn {op, level, reason}, {exec, skip} ->
-        cond do
-          level != :safe ->
-            {exec, [{op, "not :safe (#{level}): #{reason}"} | skip]}
+    decisions = Enum.map(entries, &gate/1)
+    not_added = not_added_columns(decisions)
 
-          not executable_shape?(op) ->
-            {exec,
-             [
-               {op,
-                "classified :safe but this #{elem(op, 0)} is not on the executable allowlist " <>
-                  "(a nullable add_column, a non-unique add_index, or a change_column " <>
-                  "that only drops NOT NULL)"}
-               | skip
-             ]}
+    {run, skip} =
+      decisions
+      |> Enum.map(&require_columns(&1, not_added))
+      |> Enum.split_with(&match?({:run, _op, _sql}, &1))
 
-          true ->
-            case render_for_execution(op) do
-              {:ok, sql} -> {[{op, sql} | exec], skip}
-              {:unsupported, reason} -> {exec, [{op, reason} | skip]}
-            end
-        end
-      end)
-
-    {Enum.reverse(exec), Enum.reverse(skip)}
+    {Enum.map(run, fn {:run, op, sql} -> {op, sql} end),
+     Enum.map(skip, fn {:skip, op, reason} -> {op, reason} end)}
   end
+
+  defp gate({op, level, reason}) do
+    cond do
+      level != :safe ->
+        {:skip, op, "not :safe (#{level}): #{reason}"}
+
+      not executable_shape?(op) ->
+        {:skip, op,
+         "classified :safe but this #{elem(op, 0)} is not on the executable allowlist " <>
+           "(a nullable add_column, a non-unique add_index, or a change_column " <>
+           "that only drops NOT NULL)"}
+
+      true ->
+        case render_for_execution(op) do
+          {:ok, sql} -> {:run, op, sql}
+          {:unsupported, reason} -> {:skip, op, reason}
+        end
+    end
+  end
+
+  # Columns the database lacks that this run won't add, as {table, name}.
+  # An add_index over one of them can't run either (see the moduledoc):
+  # CREATE INDEX would raise inside the transaction and roll back every
+  # other repair with it.
+  defp not_added_columns(decisions) do
+    for {:skip, op, _reason} <- decisions,
+        column = missing_column(op),
+        not is_nil(column),
+        into: MapSet.new(),
+        do: column
+  end
+
+  defp missing_column({:add_column, table, col}), do: {table, col.name}
+  defp missing_column({:possible_rename, table, _old, new}), do: {table, new.name}
+  defp missing_column(_op), do: nil
+
+  defp require_columns({:run, {:add_index, table, idx} = op, _sql} = decision, not_added) do
+    case Enum.find(idx.columns, &MapSet.member?(not_added, {table, &1})) do
+      nil ->
+        decision
+
+      column ->
+        {:skip, op,
+         "classified :safe but index #{idx.name} covers column #{column}, which this run " <>
+           "does not add — CREATE INDEX would fail and roll back every other repair"}
+    end
+  end
+
+  defp require_columns(decision, _not_added), do: decision
 
   # Gate 2. Matches the op's shape, not its tag, and never consults the
   # level: a :safe label on anything else changes nothing here.
@@ -159,8 +199,9 @@ defmodule Kumi.Apply do
   defp render_for_execution({:add_column, _table, %{exact_type?: false}} = op) do
     {:unsupported,
      "classified :safe but adds column #{elem(op, 2).name} whose type carries modifiers " <>
-       "(precision/scale/length/dimensions) — ADD COLUMN #{elem(op, 2).type} would drop them " <>
-       "and create a different column than mix ash.codegen does"}
+       "or a sequence (precision/scale/length/dimensions, serial) — " <>
+       "ADD COLUMN #{elem(op, 2).type} would drop them and create a different column " <>
+       "than mix ash.codegen does"}
   end
 
   defp render_for_execution({:add_index, _table, %{exact?: false}} = op) do

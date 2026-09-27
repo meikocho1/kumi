@@ -37,8 +37,11 @@ defmodule Kumi.Schema.Column do
   `exact_type?` says whether `type` is the whole column type or only its
   name: `numeric(10,2)`, `vector(1536)` and `varchar(255)` are all compared
   by their `udt_name` alone, so `ADD COLUMN ... numeric` would create a
-  different column than `mix ash.codegen` did. `Kumi.Desired` sets it;
-  `Kumi.Diff` never reads it, and only `Kumi.Apply` acts on it.
+  different column than `mix ash.codegen` did. It is also false for a
+  `generated?` attribute, whose value the database supplies: codegen
+  builds a generated integer as `bigserial`, and `ADD COLUMN ... int8`
+  leaves out its sequence. `Kumi.Desired` sets it; `Kumi.Diff` never reads
+  it, and only `Kumi.Apply` acts on it.
   """
 
   @enforce_keys [:name, :type, :nullable]
